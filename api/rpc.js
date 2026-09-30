@@ -110,18 +110,13 @@ module.exports = async (req, res) => {
           r = { ok: true, hasText: !!String(o.text).trim(), provider: o.provider || '', data: parsed };
         } catch (e) {
           const det = String((e && (e.detail || e.message)) || '').slice(0, 480);
-          if (e && e.multi) {   // beberapa penyedia gagal → tampilkan semua alasannya
-            r = { ok: false, code: 'OCR_DISABLED', detail: det, message: 'Baca otomatis belum bisa dipakai — ' + det };
-            break;
-          }
           const MSG = {
-            OCR_BILLING: 'Baca otomatis butuh billing aktif di project Google Cloud (hubungkan billing / Free Trial), lalu coba lagi.',
-            OCR_DISABLED: 'Cloud Vision API belum aktif di project Google Cloud ini (atau baru diaktifkan — tunggu 1–2 menit).',
-            OCR_DENIED: 'Service Account tidak punya izin memakai Cloud Vision API.'
+            OCR_DISABLED: 'Baca otomatis belum aktif',
+            OCR_DENIED: 'Izin Apps Script belum lengkap (lihat README bagian "Izin Apps Script")'
           };
           const code = e && e.code;
           r = { ok: false, code: MSG[code] ? code : 'OCR_FAILED', detail: det,
-                message: (MSG[code] || 'Gagal membaca foto KTP') + (det ? ' [' + det + ']' : '') };
+                message: (e && e.multi ? 'Baca otomatis belum bisa dipakai' : (MSG[code] || 'Gagal membaca foto KTP')) + (det ? ' — ' + det : '') };
         }
         break;
       }

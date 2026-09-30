@@ -1,158 +1,148 @@
-# Data Pendukung Pilkades — PWA (Admin & User)
+# Suara Pendukung — Data Pendukung Pilkades (PWA)
 
-Transformasi aplikasi Google Apps Script menjadi **PWA yang bisa di-install** di Android, iPhone, dan desktop, di-hosting di **Vercel** (auto-deploy dari GitHub), dengan:
+Aplikasi PWA (bisa di-install di Android, iPhone, desktop) untuk mengelola data pendukung Pilkades.
+**Hosting: Vercel (auto-deploy dari GitHub). Database: Google Sheets yang sama dengan aplikasi Apps Script lama.**
 
-- **2 interface**: **Admin** (CRUD penuh, verifikasi, cetak, pengaturan, kelola user, log) dan **User** (read-only: lihat dashboard, cari/filter data, lihat foto).
-- **Database tetap Google Sheets** + **foto tetap di Google Drive** — diakses via Service Account, **tanpa memindahkan data lama**.
-- **Login per orang** (username + password, bcrypt, JWT cookie httpOnly). Password bersama lama dipensiunkan.
-- **Foto KTP/TTD tidak lagi publik** — hanya lewat proxy `/api/photo` yang wajib login.
+- **Admin**: tambah/ubah/hapus data, verifikasi TTD, cetak, pengaturan, kelola user, log.
+- **User**: lihat dashboard, cari/filter data, lihat foto (read-only, dijaga di server).
+- **Foto KTP**: kamera berbingkai KTP, putar/crop bebas, baca otomatis Nama & NIK (gratis).
+- Login per orang (bcrypt + JWT cookie httpOnly). Foto tidak publik — hanya lewat `/api/photo` yang wajib login.
 
 ---
 
-## 1. Struktur Proyek
+## 1. Gambaran: siapa mengerjakan apa
+
+| Bagian | Dipakai untuk | Di mana |
+|---|---|---|
+| **Vercel + GitHub** | Menjalankan aplikasi. Push ke `main` → otomatis deploy | vercel.com, github.com |
+| **Google Sheets** (spreadsheet lama Anda) | **Database**: Pendukung, Config, Log, Users | diakses lewat **Service Account** |
+| **Google Drive akun Anda** | Menyimpan **foto** KTP & bukti TTD (folder `FOTO_KTP_PENDUKUNG_2026`, `FOTO_BUKTI_TTD_2026`) | lewat **Jembatan Apps Script** |
+| **Apps Script (project lama)** | Hanya sebagai **jembatan foto + baca KTP**. Aplikasi Apps Script lama tetap bisa jalan berdampingan | script.google.com |
+
+**Tidak perlu / tidak dipakai lagi:** Google Cloud Vision, billing Google Cloud, OAuth / OAuth Playground, Drive API di Cloud Console.
+Satu-satunya hal di Google Cloud Console adalah **Service Account + Sheets API** (bagian 3A).
 
 ```
-public/          Frontend (PWA): index.html, css/, js/, manifest, sw.js, ikon, vendor
-api/             Serverless functions Vercel:
-                 auth.js   → login/logout/cek sesi (+ rate limit)
-                 rpc.js    → semua action (list, add, update, delete, verify, config, users, log)
-                 photo.js  → proxy foto Drive ter-autentikasi
-                 health.js → cek koneksi spreadsheet
-lib/             Logika inti: gauth, gsheets, gdrive, domain (parse NIK dll),
-                 store (CRUD), auth (JWT, bcrypt, manajemen user)
-legacy/          Kode Apps Script lama (arsip referensi, tidak ikut deploy)
-mock/            Dev server lokal dengan Google di-mock (untuk QA tanpa kredensial)
+Browser (PWA) ──► Vercel (api/*.js) ──► Google Sheets API  (data; Service Account)
+                                   └──► Web App Apps Script ──► Drive Anda (foto) + OCR Drive (baca KTP)
 ```
 
-## 2. Setup Google Cloud (sekali, ±15 menit)
+## 2. Struktur Proyek
 
-1. Buka [console.cloud.google.com](https://console.cloud.google.com) → buat project (mis. `pendukung-pilkades`).
-2. **APIs & Services → Library** → aktifkan **Google Sheets API** dan **Google Drive API**.
-3. **APIs & Services → Credentials → Create Credentials → Service account**.
-   - Nama bebas (mis. `pendukung-bot`), role tidak perlu khusus → selesai.
-4. Klik service account itu → tab **Keys → Add key → Create new key → JSON** → file JSON terunduh.
-5. **Bagikan spreadsheet** Anda: klik **Share** di spreadsheet → tambahkan email service account
-   (`pendukung-bot@<project>.iam.gserviceaccount.com`) sebagai **Editor**.
-6. **Bagikan 2 folder Drive**: `FOTO_KTP_PENDUKUNG_2026` dan `FOTO_BUKTI_TTD_2026`
-   (klik kanan folder → Share → email service account sebagai **Editor**).
-   > Jika folder belum ada, aplikasi akan membuatnya otomatis — pastikan folder induk/akun bisa dibuat.
-7. Catat **Spreadsheet ID** dari URL: `docs.google.com/spreadsheets/d/`**`INI_ID`**`/edit`.
+```
+public/       Frontend PWA: index.html, css/, js/ (app, ktpcam, pages, pwa), sw.js, ikon, vendor
+api/          Serverless Vercel: auth.js (login), rpc.js (semua aksi), photo.js (proxy foto), health.js (diagnosis)
+lib/          gauth (Sheets), gsheets (baca/tulis + cache), gdrive (klien jembatan foto), ocr, ktp (parser & validasi NIK),
+              domain, store (CRUD), auth
+apps-script/  PhotoGateway.gs — skrip untuk ditempel di project Apps Script Anda
+mock/         Dev server lokal dengan Google di-mock (QA tanpa kredensial)
+```
 
-## 3. Deploy ke Vercel
+## 3. Setup (sekali)
 
-1. **Push repo ini ke GitHub** (lihat bagian 6).
-2. Di [vercel.com](https://vercel.com) → **Add New → Project** → pilih repo → **Import**.
-   - Framework Preset: **Other** (biarkan default, tidak perlu build command).
-3. **Environment Variables** — tambahkan (copy dari `.env.example`):
+### A. Service Account untuk Google Sheets
+1. [console.cloud.google.com](https://console.cloud.google.com) → buat/pilih project → **APIs & Services → Library** → aktifkan **Google Sheets API** (hanya ini).
+2. **Credentials → Create credentials → Service account** (nama bebas) → klik akun itu → **Keys → Add key → JSON** → file JSON terunduh.
+3. Buka spreadsheet → **Share** → tambahkan email service account (`...@...iam.gserviceaccount.com`) sebagai **Editor**.
+4. Catat **Spreadsheet ID** dari URL: `docs.google.com/spreadsheets/d/`**`INI_ID`**`/edit`.
 
-   | Nama | Isi |
-   |---|---|
-   | `GOOGLE_CREDENTIALS` | Seluruh isi file JSON service account **dalam satu baris** |
-   | `SPREADSHEET_ID` | ID spreadsheet dari langkah 2.7 |
-   | `JWT_SECRET` | Kunci acak panjang — buat dengan `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
-   | `ADMIN_USERNAME` | Username admin pertama (mis. `admin`) |
-   | `ADMIN_PASSWORD` | Password admin pertama (kuat! akun ini dibuat otomatis saat login pertama) |
+### B. Vercel
+1. [vercel.com](https://vercel.com) → **Add New → Project** → pilih repo GitHub ini → Framework **Other** → Deploy.
+2. **Settings → Environment Variables** (lihat tabel bagian 4) → **Redeploy**.
+3. **Settings → Functions → Function Region → Singapore (sin1)** agar respons lebih cepat dari Indonesia (lalu Redeploy).
+4. Buka `https://<app>.vercel.app/api/health` → harus `{"ok":true,"spreadsheet":true,...}`.
+5. Login dengan `ADMIN_USERNAME`/`ADMIN_PASSWORD` (akun admin dibuat otomatis) → **Akun → Ganti Password**.
 
-4. **Deploy** → setelah selesai, buka `https://<app>.vercel.app/api/health` → harus `{"ok":true,...}`.
-5. Login dengan `ADMIN_USERNAME`/`ADMIN_PASSWORD` → akun admin otomatis dibuat di sheet **Users**.
-   **Segera ganti password** lewat halaman **Akun → Ganti Password**.
+### C. Jembatan Apps Script (untuk foto & baca KTP)
+Di project Apps Script lama (yang terikat ke spreadsheet yang sama):
 
-## 4. Manajemen User & Role
-
-- Admin: **👥 Kelola User** → tambah user (username, nama, role, password), edit, aktif/nonaktifkan, reset password.
-- Role **User**: hanya lihat Dashboard + Data (cari, filter, detail, foto). Semua aksi tulis **ditolak di server** (bukan hanya disembunyikan).
-- Role **Admin**: akses penuh + lihat **📋 Log Aktivitas** (login, add, update, delete, verify, cetak, perubahan config, percobaan aksi yang ditolak).
-- Minimal 1 admin aktif selalu dijaga (tidak bisa dinonaktifkan/diturunkan semua).
-
-## 5. PWA — Install di Perangkat
-
-- **Android (Chrome)**: buka app → muncul tombol **⬇️ Install App** (atau menu ⋮ → *Install app*).
-- **Desktop (Chrome/Edge)**: ikon install di address bar, atau tombol install di app.
-- **iPhone (Safari)**: Share → **Add to Home Screen**.
-- App shell tampil saat offline (halaman offline ramah); data/foto tetap butuh internet.
-
-## 5b. Hari H Pemilihan
-
-Admin menetapkan jadwal di **Atur → Hari H Pemilihan** (nama acara, tanggal, jam & lokasi opsional). Seluruh tim melihat **banner hitung mundur** ("12 hari lagi") di Dashboard; warnanya berubah oranye saat H-7 dan hijau di hari-H. Jadwal disimpan di sheet `Config` (tanpa sheet tambahan) dan memakai zona **WITA**. Tidak ada notifikasi/pengingat otomatis.
-
-### Kuota Google Sheets API
-Google membatasi **60 permintaan baca per menit** per proyek. Aplikasi sudah dihemat: sheet dibaca berkelompok (`batchGet`), versi data di-cache 15 dtk, cek perubahan data tiap 30 dtk, dan pengecekan struktur sheet hanya sekali per 10 menit. Bila kuota tetap terlampaui, aplikasi menampilkan pesan *"Server sedang sibuk"* dan pulih sendiri dalam ±1 menit (Cloud Console → *APIs & Services → Sheets API → Quotas* bila ingin menaikkan batas).
-
-## 5c. Foto KTP: kamera berbingkai, putar/crop, baca otomatis Nama & NIK
-
-- **Kamera** (Input → Kamera): kamera langsung dengan bingkai rasio KTP (85,6 × 53,98 mm); yang tersimpan hanya isi bingkai. Ada indikator kualitas (gelap/silau/buram), senter & zoom bila didukung perangkat. Bila izin kamera ditolak, otomatis memakai kamera bawaan HP.
-- **Galeri / Putar / Crop**: editor dengan putar 90°, miringkan bebas −45°…+45°, zoom, crop rasio KTP atau bebas. Tombol **Putar / Crop** di bawah foto membuka ulang editor dari foto asli.
-- **Baca otomatis Nama & NIK**: setelah foto final, server membaca KTP memakai **Google Cloud Vision** (OCR) lalu `lib/ktp.js` menguraikan & memvalidasi NIK (kode wilayah, tanggal lahir, silang-cek dengan tanggal lahir di KTP). Hasil hanya **mengisi form** — tetap diperiksa manual sebelum Simpan. Bila tak yakin/foto kurang jelas, pengguna diminta isi manual.
-- **Mengaktifkan OCR (sekali)**: di Google Cloud Console project yang sama dengan Service Account → *APIs & Services → Library* → aktifkan **Cloud Vision API** (perlu billing aktif; gratis 1.000 gambar/bulan pertama). Tidak ada variabel env baru. Bila belum aktif, aplikasi tetap berjalan dan menampilkan "isi manual".
-- **Tanpa billing Google? Pakai OCR.space (gratis, tanpa kartu)**: daftar API key gratis di ocr.space, lalu di Vercel → Settings → Environment Variables tambahkan `OCRSPACE_API_KEY` (Redeploy). Bila Google Vision belum bisa dipakai (billing/API belum aktif), aplikasi otomatis memakai OCR.space; `OCR_PROVIDER=ocrspace` memaksa OCR.space saja. Akurasi OCR.space di bawah Google Vision, tetapi validasi NIK tetap menolak hasil yang tidak wajar.
-- Foto KTP gagal diunggah ke Google Drive **tidak lagi membatalkan simpan data** (data tersimpan + peringatan; foto bisa diunggah ulang lewat Edit). Saat edit, foto lama dibuang hanya setelah foto baru sukses.
-- Privasi: foto KTP dikirim ke Google Vision hanya untuk dibaca; aplikasi tidak menyimpan hasil OCR.
-
-## 5d. Foto KTP/TTD di Google Drive: hubungkan akun Google Anda (OAuth)
-
-**Kenapa perlu?** Service Account Google *tidak punya kuota penyimpanan Drive* sehingga tidak bisa menyimpan file (pesan: *"Service Accounts do not have storage quota"*). Solusinya: foto disimpan di Drive **akun Google Anda sendiri** (kuota 15 GB gratis). Service Account tetap dipakai untuk Google Sheets. Bonus: foto lama yang dibuat akun Anda (mis. dari versi Apps Script) ikut terbaca.
-
-1. **Google Cloud Console** (project yang sama) → *APIs & Services* → pastikan **Google Drive API** *Enabled*.
-2. *OAuth consent screen / Google Auth Platform* → User type **External** → isi nama aplikasi & email → tambahkan email Anda di **Test users** → klik **Publish app** (status *In production*) agar token tidak kedaluwarsa 7 hari.
-3. *Credentials* → **Create credentials → OAuth client ID** → tipe **Web application** → *Authorized redirect URIs*: `https://developers.google.com/oauthplayground` → salin **Client ID** & **Client secret**.
-4. Buka **https://developers.google.com/oauthplayground** → ikon ⚙️ → centang **Use your own OAuth credentials** → tempel Client ID & secret → di kolom scope isi `https://www.googleapis.com/auth/drive` → **Authorize APIs** (login akun pemilik Drive; bila muncul "Google hasn't verified this app" → *Advanced → Go to … (unsafe)* → izinkan) → **Exchange authorization code for tokens** → salin **Refresh token**.
-5. **Vercel → Settings → Environment Variables** tambahkan: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` → **Redeploy**.
-6. Cek `https://<domain-anda>/api/health` → harus ada `"drive":{"mode":"oauth","ok":true,"akun":"email-anda"}`.
-
-Tanpa variabel itu aplikasi tetap jalan: data tersimpan, hanya foto yang gagal (dengan peringatan jelas).
-
-## 5e. Foto via Jembatan Apps Script (paling stabil — tanpa token kedaluwarsa, tanpa billing)
-
-Bila project Apps Script lama (yang terikat ke spreadsheet yang sama) masih ada, foto bisa disimpan lewat **Web App Apps Script** milik Anda. Skrip berjalan atas nama akun Anda sehingga foto masuk ke Drive Anda (folder `FOTO_KTP_PENDUKUNG_2026` / `FOTO_BUKTI_TTD_2026` yang sama, foto lama tetap terbaca) dan **tidak ada token yang kedaluwarsa**.
-
-1. Di project Apps Script, tekan **Ctrl+F** cari `doPost`. Bila **sudah ada** (mis. `function doPost(e){ return handleRequest(e); }`), ubah menjadi:
+1. **Tambah file**: klik **+** di samping *File* → **Skrip** → namai `PhotoGateway` → tempel seluruh isi [`apps-script/PhotoGateway.gs`](apps-script/PhotoGateway.gs).
+2. **Isi kunci**: ganti `GANTI_DENGAN_KUNCI_ACAK_MIN_24_KARAKTER` di baris `PGW_KEY` dengan teks acak buatan Anda (≥ 24 karakter). Jangan dibagikan.
+3. **Gabungkan `doPost`**: di `Code.gs` ada `doPost` lama. Ubah menjadi:
    ```js
    function doPost(e) {
-     const pg = pgw_tryHandle_(e);   // jembatan foto
+     const pg = pgw_tryHandle_(e);   // permintaan jembatan foto (punya field "op")
      if (pg) return pg;
-     return handleRequest(e);        // aplikasi lama
+     return handleRequest(e);        // permintaan aplikasi lama
    }
    ```
-   Bila belum ada, tambahkan fungsi di atas tanpa baris `handleRequest`.
-2. **File + → Skrip**, namai `PhotoGateway`, tempel seluruh isi [`apps-script/PhotoGateway.gs`](apps-script/PhotoGateway.gs).
-3. **Beri izin sekali:** di editor pilih fungsi `pgwAuthorize` pada dropdown fungsi → **Jalankan** → **Tinjau izin** → pilih akun → *Advanced → Go to … (unsafe)* → **Izinkan**. (Tanpa ini, `/api/health` menampilkan *You do not have permission to call …*.)
-4. Ganti `PGW_KEY` dengan teks acak ≥ 24 karakter (simpan untuk langkah 6). **Simpan** (Ctrl+S).
-5. **Terapkan → Kelola deployment** → ikon pensil pada deployment Web App → **Versi: Versi baru** → **Terapkan**. Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: Siapa saja*. Salin **URL Web App** (berakhiran `/exec`). Bila Google meminta izin baru, izinkan.
-6. Vercel → Settings → Environment Variables:
-   - `APPSCRIPT_PHOTO_URL` = URL Web App (type **Config**)
-   - `APPSCRIPT_PHOTO_KEY` = nilai `PGW_KEY` (type **Secret**)
-7. **Redeploy**, lalu cek `/api/health` → `"drive":{"mode":"appscript","ok":true,"akun":"email-anda"}`.
+4. **Tambah layanan Drive** (untuk OCR): sidebar **Layanan (+)** → **Drive API** → **Tambahkan**.
+5. **Cek izin di `appsscript.json`** — lihat bagian 5 (langkah ini yang paling sering terlewat).
+6. **Beri izin**: di dropdown fungsi pilih **`pgwAuthorize`** → **Jalankan** → **Tinjau izin** → akun Anda → *Advanced → Go to … (unsafe)* → **Izinkan**. (Dialog izin tidak muncul bila `oauthScopes` belum lengkap — kembali ke langkah 5.)
+7. **Deploy**: **Terapkan → Kelola deployment** → pensil pada Web App → **Versi: Versi baru** → **Terapkan**.
+   Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: **Siapa saja***. Salin **URL Web App** (berakhiran `/exec`).
+8. **Vercel** → Environment Variables: `APPSCRIPT_PHOTO_URL` = URL tadi, `APPSCRIPT_PHOTO_KEY` = isi `PGW_KEY` → **Redeploy**.
+9. Buka `/api/health`: bagian `foto` harus `"ok":true` dan `izin` semuanya `true`.
 
-### Baca otomatis Nama & NIK GRATIS lewat jembatan yang sama (OCR bawaan Google Drive)
-Jembatan juga punya operasi `ocr` yang memakai OCR Google Drive (gratis, berjalan atas nama akun Anda, tanpa billing). Tambahan langkah sekali saja di Apps Script:
-1. Di editor Apps Script: **Layanan (+)** di sidebar kiri → pilih **Drive API** → **Tambahkan**.
-2. Deploy ulang (Terapkan → Kelola deployment → pensil → Versi baru). Google akan meminta izin tambahan (Google Dokumen & Drive) — izinkan.
-3. Selesai. Urutan OCR aplikasi: **Google Vision** (bila billing aktif) → **Apps Script/Drive OCR** → **OCR.space** (bila `OCRSPACE_API_KEY` diisi). `OCR_PROVIDER=appscript` memaksa Drive OCR.
-Akurasi Drive OCR belum tentu setinggi Google Vision pada KTP berlatar ramai; validasi NIK (kode wilayah, tanggal lahir, silang-cek) tetap menolak hasil yang tidak wajar.
+## 4. Variabel Environment (Vercel)
 
-Prioritas penyimpanan foto: **Jembatan Apps Script → OAuth (5d) → Service Account**. Bila `APPSCRIPT_PHOTO_*` dihapus, aplikasi kembali ke OAuth.
+| Nama | Type | Wajib | Isi |
+|---|---|---|---|
+| `GOOGLE_CREDENTIALS` | Secret | ya | Seluruh isi JSON service account, satu baris |
+| `SPREADSHEET_ID` | Config | ya | ID spreadsheet |
+| `JWT_SECRET` | Secret | ya | Teks acak panjang (`node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`) |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Config / Secret | ya | Admin pertama (dibuat otomatis saat login pertama) |
+| `APPSCRIPT_PHOTO_URL` | Config | untuk foto | URL Web App Apps Script (`.../exec`) |
+| `APPSCRIPT_PHOTO_KEY` | Secret | untuk foto | Sama dengan `PGW_KEY` di skrip |
+| `OCRSPACE_API_KEY` | Secret | opsional | Cadangan baca KTP gratis dari ocr.space |
 
-## 6. Alur Kerja Git → Deploy
+Pilih environment **Production** saja. Variabel baru aktif setelah **Redeploy**.
+
+## 5. Izin Apps Script (`appsscript.json`)
+
+Skrip memerlukan izin: **Drive**, **Google Dokumen** (OCR), dan **email akun**. Buka file **`appsscript.json`** di editor Apps Script:
+
+- Bila **tidak ada** baris `"oauthScopes"` → tidak perlu diubah; jalankan `pgwAuthorize` (langkah C6).
+- Bila **ada** `"oauthScopes": [ ... ]` → Google hanya memberi izin yang tercantum. **Tambahkan** yang belum ada:
+  ```json
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/script.external_request"
+  ]
+  ```
+  (pertahankan scope lain yang sudah ada), simpan, jalankan `pgwAuthorize` lagi, lalu deploy versi baru.
+
+Gejala bila izin kurang: `/api/health` → `foto.izin` ada yang `false`, atau pesan *"You do not have permission to call …"*.
+
+## 6. Fitur
+
+- **User & role**: Admin → *Kelola User* (tambah, ubah, aktif/nonaktif, reset password). Role *User* hanya membaca; aksi tulis ditolak di server. Minimal 1 admin aktif selalu dijaga.
+- **PWA**: Android (Chrome) → tombol *Install App*; iPhone (Safari) → Share → *Add to Home Screen*; desktop → ikon install di address bar. Tampilan dasar tersedia offline, data/foto butuh internet.
+- **Hari H Pemilihan**: Admin atur di *Atur → Hari H Pemilihan* (tanggal, jam, lokasi, zona WITA) → banner hitung mundur di Dashboard.
+- **Foto KTP**: *Kamera* dengan bingkai rasio KTP (hanya isi bingkai yang tersimpan; indikator gelap/silau/buram, senter, zoom) atau *Galeri*; editor putar 90°, miringkan −45°…+45°, zoom, crop rasio KTP/bebas.
+- **Baca otomatis Nama & NIK**: OCR bawaan Google Drive lewat jembatan (gratis), cadangan OCR.space. Hasil hanya **mengisi form**; NIK divalidasi (kode wilayah, tanggal lahir, silang-cek dengan tanggal lahir di KTP); NIK yang tidak 16 digit ditolak, bukan ditebak. Foto tak jelas → isi manual.
+- **Bila foto gagal diunggah**, data **tetap tersimpan** dengan peringatan; foto bisa diunggah ulang lewat *Edit*. Saat edit, foto lama dibuang hanya setelah foto baru sukses.
+
+## 7. Kinerja
+
+- **Cache baca sheet** (`lib/gsheets.js`, TTL 5–10 dtk): dashboard/daftar/versi/cek NIK yang datang bersamaan memakai satu bacaan ke Google Sheets. Bacaan sebelum **menulis** selalu *fresh* (nomor baris akurat).
+- Perubahan dari aplikasi Apps Script lama / instance lain bisa tampil terlambat ≤ 10 detik.
+- Foto di-cache privat di perangkat 1 hari (`/api/photo`); pustaka PDF/crop dimuat `defer`; font tidak memblokir tampilan pertama; service worker men-cache *app shell*.
+- **Function Region Singapore** (bagian 3B) memangkas latensi untuk pengguna Indonesia.
+- Kuota Google Sheets 60 baca/menit: bila terlampaui muncul *"Server sedang sibuk"* dan pulih sendiri ±1 menit.
+
+## 8. Diagnosis cepat: `/api/health`
+
+| Yang terlihat | Artinya / tindakan |
+|---|---|
+| `spreadsheet:false` | `GOOGLE_CREDENTIALS`/`SPREADSHEET_ID` salah, atau spreadsheet belum dibagikan ke service account |
+| `foto.catatan: APPSCRIPT_PHOTO_... belum diisi` | Isi dua variabel jembatan di Vercel lalu Redeploy |
+| `foto.catatan: ... tidak membalas JSON` | Deploy Web App belum *Siapa saja* / belum versi terbaru / URL bukan `/exec` |
+| `foto.catatan: Kunci salah` | `APPSCRIPT_PHOTO_KEY` ≠ `PGW_KEY` di skrip |
+| `foto.izin.dokumen/email:false` | Izin kurang → bagian 5 |
+| `foto.izin.driveApi:false` | Tambahkan layanan **Drive API** (langkah C4) lalu deploy versi baru |
+
+## 9. Git → Deploy, QA Lokal, Catatan Teknis
 
 ```bash
-git add -A
-git commit -m "PWA: admin & user, sheets backend, pwa"
-git push origin main          # Vercel otomatis deploy
+git add -A && git commit -m "..." && git push origin main     # Vercel otomatis deploy
+npm install && npm run dev                                     # http://localhost:4173 — admin / admin123 (Google di-mock)
 ```
 
-## 7. QA Lokal Tanpa Kredensial Google
-
-```bash
-npm install
-npm run dev        # http://localhost:4173 — login: admin / admin123
-```
-
-Server ini menjalankan **handler API asli** dengan Google Sheets/Drive di-mock di memori — cocok untuk uji UI/alur tanpa menyentuh data produksi.
-
-## 8. Catatan Teknis Penting
-
-- **Respons API identik dengan Apps Script lama** (`{ok, message, ...}`), frontend lama hampir tanpa perubahan logika; `google.script.run` digantikan shim fetch (`public/js/api-shim.js`).
-- **Sheet baru `Users`** dibuat otomatis: `ID | Username | PasswordHash | Nama | Role | Aktif | CreatedAt | LastLogin`. Data `Pendukung`, `Config`, `Log` lama tetap dipakai apa adanya (Log kini berkolom `Username` — baris lama tetap aman dibaca).
-- **Race condition**: cek duplikat NIK tetap server-side pada setiap add/update; fitur Scan Duplikat menjadi jaring pengaman.
-- **Batas ukuran**: payload RPC maks ±15 MB (foto sudah dikompresi + crop di client).
-- **Keamanan**: cookie `HttpOnly; SameSite=Lax` 7 hari; rate limit login (10 gagal → blokir 10 menit); security headers via `vercel.json`; foto `Cache-Control: no-store`.
+- Respons API identik dengan Apps Script lama (`{ok, message, ...}`); `google.script.run` digantikan shim fetch (`public/js/api-shim.js`).
+- Sheet `Users` dibuat otomatis; `Pendukung`, `Config`, `Log` lama dipakai apa adanya (dapat dipakai bersamaan dengan aplikasi Apps Script lama).
+- Cek duplikat NIK di server pada setiap tambah/ubah; *Scan Duplikat* sebagai jaring pengaman.
+- Keamanan: cookie `HttpOnly; SameSite=Lax` 7 hari; rate limit login; security headers via `vercel.json`; `PGW_KEY` hanya di skrip dan di env Vercel (Secret).
