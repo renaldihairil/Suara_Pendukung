@@ -109,7 +109,11 @@ module.exports = async (req, res) => {
           const parsed = ktp.parseKtpText(o.text);
           r = { ok: true, hasText: !!String(o.text).trim(), provider: o.provider || '', data: parsed };
         } catch (e) {
-          const det = String((e && (e.detail || e.message)) || '').slice(0, 240);
+          const det = String((e && (e.detail || e.message)) || '').slice(0, 480);
+          if (e && e.multi) {   // beberapa penyedia gagal → tampilkan semua alasannya
+            r = { ok: false, code: 'OCR_DISABLED', detail: det, message: 'Baca otomatis belum bisa dipakai — ' + det };
+            break;
+          }
           const MSG = {
             OCR_BILLING: 'Baca otomatis butuh billing aktif di project Google Cloud (hubungkan billing / Free Trial), lalu coba lagi.',
             OCR_DISABLED: 'Cloud Vision API belum aktif di project Google Cloud ini (atau baru diaktifkan — tunggu 1–2 menit).',
