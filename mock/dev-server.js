@@ -113,6 +113,7 @@ const sheetsApi = {
 };
 
 const driveApi = {
+  about: { async get() { return { data: { user: { emailAddress: 'mock@example.com' }, storageQuota: { limit: String(15e9), usage: '1000000' } } }; } },
   files: {
     async list(opts) {
       const nameMatch = String(opts.q || '').match(/name="([^"]+)"/);
@@ -124,6 +125,10 @@ const driveApi = {
       return { data: { files: [] } };
     },
     async create(opts) {
+      // Uji: Service Account tanpa kuota Drive (perilaku Google asli); OAuth akun pemilik tidak kena
+      if (process.env.MOCK_DRIVE_NOQUOTA && !process.env.GOOGLE_OAUTH_REFRESH_TOKEN && !(opts.requestBody && opts.requestBody.mimeType === 'application/vnd.google-apps.folder')) {
+        const e = new Error('Service Accounts do not have storage quota. Leverage shared drives or use OAuth delegation.'); e.code = 403; throw e;
+      }
       const id = 'F' + (++fileSeq);
       if (opts.requestBody && opts.requestBody.mimeType === 'application/vnd.google-apps.folder') {
         mockFiles[id] = { id, isFolder: true, name: opts.requestBody.name };
@@ -155,7 +160,7 @@ const driveApi = {
 
 const fakeGoogleapis = {
   google: {
-    auth: { JWT: function () {} },
+    auth: { JWT: function () {}, OAuth2: function () { this.setCredentials = function () {}; this.isOAuth = true; } },
     sheets: () => sheetsApi,
     drive: () => driveApi
   }

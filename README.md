@@ -88,6 +88,19 @@ Google membatasi **60 permintaan baca per menit** per proyek. Aplikasi sudah dih
 - Foto KTP gagal diunggah ke Google Drive **tidak lagi membatalkan simpan data** (data tersimpan + peringatan; foto bisa diunggah ulang lewat Edit). Saat edit, foto lama dibuang hanya setelah foto baru sukses.
 - Privasi: foto KTP dikirim ke Google Vision hanya untuk dibaca; aplikasi tidak menyimpan hasil OCR.
 
+## 5d. Foto KTP/TTD di Google Drive: hubungkan akun Google Anda (OAuth)
+
+**Kenapa perlu?** Service Account Google *tidak punya kuota penyimpanan Drive* sehingga tidak bisa menyimpan file (pesan: *"Service Accounts do not have storage quota"*). Solusinya: foto disimpan di Drive **akun Google Anda sendiri** (kuota 15 GB gratis). Service Account tetap dipakai untuk Google Sheets. Bonus: foto lama yang dibuat akun Anda (mis. dari versi Apps Script) ikut terbaca.
+
+1. **Google Cloud Console** (project yang sama) → *APIs & Services* → pastikan **Google Drive API** *Enabled*.
+2. *OAuth consent screen / Google Auth Platform* → User type **External** → isi nama aplikasi & email → tambahkan email Anda di **Test users** → klik **Publish app** (status *In production*) agar token tidak kedaluwarsa 7 hari.
+3. *Credentials* → **Create credentials → OAuth client ID** → tipe **Web application** → *Authorized redirect URIs*: `https://developers.google.com/oauthplayground` → salin **Client ID** & **Client secret**.
+4. Buka **https://developers.google.com/oauthplayground** → ikon ⚙️ → centang **Use your own OAuth credentials** → tempel Client ID & secret → di kolom scope isi `https://www.googleapis.com/auth/drive` → **Authorize APIs** (login akun pemilik Drive; bila muncul "Google hasn't verified this app" → *Advanced → Go to … (unsafe)* → izinkan) → **Exchange authorization code for tokens** → salin **Refresh token**.
+5. **Vercel → Settings → Environment Variables** tambahkan: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` → **Redeploy**.
+6. Cek `https://<domain-anda>/api/health` → harus ada `"drive":{"mode":"oauth","ok":true,"akun":"email-anda"}`.
+
+Tanpa variabel itu aplikasi tetap jalan: data tersimpan, hanya foto yang gagal (dengan peringatan jelas).
+
 ## 6. Alur Kerja Git → Deploy
 
 ```bash
