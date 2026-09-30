@@ -5,7 +5,7 @@
  *  - Navigasi (HTML)     : network-first → fallback cache → offline.html
  *  - /api/*              : network-only (data selalu fresh; foto no-store)
  * ============================================================ */
-const VERSION = 'pendukung-v6';
+const VERSION = 'pendukung-v7';
 const SHELL = [
   '/',
   '/index.html',

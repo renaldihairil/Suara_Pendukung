@@ -15,7 +15,8 @@
   const state = A.state || {};
 
   const CACHE_MS = 60 * 1000;
-  const G = { loaded: false, at: 0, data: [], countdown: null, settings: { enabled: true }, today: '', pushEnabled: false, loading: false, waiters: [] };
+  const DEF_ZONES = { 'Asia/Jakarta': { label: 'WIB', offset: 420, nama: 'Waktu Indonesia Barat' }, 'Asia/Makassar': { label: 'WITA', offset: 480, nama: 'Waktu Indonesia Tengah' }, 'Asia/Jayapura': { label: 'WIT', offset: 540, nama: 'Waktu Indonesia Timur' } };
+  const G = { refZone: 'Asia/Makassar', userZone: 'Asia/Makassar', zones: DEF_ZONES, tz: null, loaded: false, at: 0, data: [], countdown: null, settings: { enabled: true }, today: '', pushEnabled: false, loading: false, waiters: [] };
 
   const JENIS = {
     pemilihan: { label: 'Hari Pemilihan', tone: 'navy', icon: '🗳️' },
@@ -35,6 +36,23 @@
   const fmtMon = ymd => new Date(dayNum(ymd) * 86400000).toLocaleDateString('id-ID', { month: 'short', timeZone: 'UTC' });
   const dayLabel = d => d < 0 ? 'Selesai' : d === 0 ? 'Hari ini' : d === 1 ? 'Besok' : d + ' hari lagi';
 
+
+  /* ---------------- zona waktu ---------------- */
+  const zInfo = z => (G.zones && G.zones[z]) || DEF_ZONES[z] || DEF_ZONES['Asia/Makassar'];
+  const zLabel = z => zInfo(z).label;
+  /** "08:00 WITA" + (bila zona user berbeda) " • 07:00 WIB di zona Anda" */
+  function fmtJam(jam) {
+    if (!jam) return '';
+    const base = jam + ' ' + zLabel(G.refZone);
+    if (!G.userZone || G.userZone === G.refZone) return base;
+    const m = /^(\d{2}):(\d{2})$/.exec(jam);
+    if (!m) return base;
+    let mins = +m[1] * 60 + +m[2] + (zInfo(G.userZone).offset - zInfo(G.refZone).offset);
+    mins = ((mins % 1440) + 1440) % 1440;
+    const hh = String(Math.floor(mins / 60)).padStart(2, '0'), mm = String(mins % 60).padStart(2, '0');
+    return base + ' (' + hh + ':' + mm + ' ' + zLabel(G.userZone) + ')';
+  }
+
   /* ---------------- data ---------------- */
   function load(cb, force) {
     const fresh = G.loaded && Date.now() - G.at < CACHE_MS;
@@ -45,7 +63,8 @@
     rpc('apiGetAgenda').then(r => {
       if (r && r.ok) {
         G.data = r.data || []; G.countdown = r.countdown || null; G.settings = r.settings || { enabled: true };
-        G.today = r.today || ''; G.pushEnabled = !!r.pushEnabled; G.timezone = (r.timezone === 'Asia/Jakarta' ? 'WIB' : r.timezone) || 'WIB'; G.loaded = true; G.at = Date.now();
+        G.today = r.today || ''; G.pushEnabled = !!r.pushEnabled;
+        G.refZone = r.refZone || G.refZone; G.userZone = r.userZone || G.userZone; if (r.zones) G.zones = r.zones; G.loaded = true; G.at = Date.now();
       }
     }).catch(() => {}).then(() => {
       G.loading = false;
@@ -78,7 +97,7 @@
       '<div class="hh-count"><div class="hh-num">' + esc(big) + '</div><div class="hh-unit">' + esc(unit) + '</div></div>' +
       '<div class="hh-body">' +
         '<div class="hh-kicker">🗳️ ' + esc((c.judul || 'HARI PEMILIHAN').toUpperCase()) + '</div>' +
-        '<div class="hh-title">' + esc(c.tanggalPanjang) + (c.jam ? ' • ' + esc(c.jam) + ' WIB' : '') + '</div>' +
+        '<div class="hh-title">' + esc(c.tanggalPanjang) + (c.jam ? ' • ' + esc(fmtJam(c.jam)) : '') + '</div>' +
         (c.lokasi ? '<div class="hh-loc">📍 ' + esc(c.lokasi) + '</div>' : '') +
         '<div class="hh-msg">' + esc(c.message) + '</div>' +
       '</div>' +
@@ -92,7 +111,7 @@
       '<div class="ag-date tone-' + j.tone + '"><b>' + esc(fmtDay(a.tanggal)) + '</b><span>' + esc(fmtMon(a.tanggal)) + '</span></div>' +
       '<div class="ag-info">' +
         '<div class="ag-title">' + esc(a.judul) + '</div>' +
-        '<div class="ag-meta">' + (a.jam ? '🕒 ' + esc(a.jam) + ' WIB' : 'Sepanjang hari') + (a.lokasi ? ' • 📍 ' + esc(a.lokasi) : '') + '</div>' +
+        '<div class="ag-meta">' + (a.jam ? '🕒 ' + esc(fmtJam(a.jam)) : 'Sepanjang hari') + (a.lokasi ? ' • 📍 ' + esc(a.lokasi) : '') + '</div>' +
         (a.catatan ? '<div class="ag-note">' + esc(a.catatan) + '</div>' : '') +
       '</div>' +
       '<div class="ag-side"><span class="ag-kind kind-' + j.tone + '">' + esc(j.label) + '</span><span class="ag-when' + (a.days <= 1 ? ' soon' : '') + '">' + esc(dayLabel(a.days)) + '</span></div>' +
@@ -108,10 +127,20 @@
         : '<div class="act-empty">Belum ada agenda mendatang.' + (admin() ? ' Tambahkan jadwal kunjungan, rapat, atau hari pemilihan.' : '') + '</div>');
   }
 
+  // tanggal & jam di kartu dashboard mengikuti zona waktu user
+  function clock(root) {
+    const d = root.querySelector('.dc-d'), t = root.querySelector('.dc-t');
+    if (!d || !t) return;
+    const now = new Date();
+    d.textContent = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: G.userZone });
+    t.textContent = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: G.userZone }).replace('.', ':') + ' ' + zLabel(G.userZone);
+  }
+
   function mountDashboard(root) {
     const b = root.querySelector('#agendaBanner');
     const c = root.querySelector('#agendaCard');
     const paint = () => {
+      clock(root);
       if (b && b.isConnected) { b.innerHTML = bannerHtml(); bindBanner(b); }
       if (c && c.isConnected) { c.innerHTML = agendaCardHtml(); const add = c.querySelector('#agAdd'); if (add) add.addEventListener('click', () => openModal(null)); }
     };
@@ -140,7 +169,7 @@
     return '<div class="ag-row' + (past ? ' past' : '') + '" data-agid="' + esc(a.id) + '">' +
       '<div class="ag-date tone-' + j.tone + '"><b>' + esc(fmtDay(a.tanggal)) + '</b><span>' + esc(fmtMon(a.tanggal)) + '</span></div>' +
       '<div class="ag-info"><div class="ag-title">' + esc(a.judul) + ' <span class="ag-kind kind-' + j.tone + '">' + esc(j.label) + '</span></div>' +
-      '<div class="ag-meta">' + esc(fmtLong(a.tanggal)) + (a.jam ? ' • ' + esc(a.jam) + ' WIB' : '') + (a.lokasi ? ' • ' + esc(a.lokasi) : '') + '</div></div>' +
+      '<div class="ag-meta">' + esc(fmtLong(a.tanggal)) + (a.jam ? ' • ' + esc(fmtJam(a.jam)) : '') + (a.lokasi ? ' • ' + esc(a.lokasi) : '') + '</div></div>' +
       '<span class="ag-when' + (a.days >= 0 && a.days <= 1 ? ' soon' : '') + '">' + esc(dayLabel(a.days)) + '</span>' +
       '<div class="cfg-kk-actions"><button class="cfg-kk-btn edit" data-agedit="' + esc(a.id) + '" title="Edit" type="button">' + (ICONS.edit || '✎') + '</button>' +
       '<button class="cfg-kk-btn del" data-agdel="' + esc(a.id) + '" title="Hapus" type="button">' + (ICONS.trash || '🗑') + '</button></div>' +
@@ -165,8 +194,10 @@
       '<div class="cfg-section-head"><div class="cfg-section-ico">' + (ICONS.bell || '🔔') + '</div>' +
         '<div><div class="cfg-section-title">Pengingat Otomatis</div><div class="cfg-section-sub">Notifikasi penyemangat &amp; hitung mundur ke seluruh tim</div></div></div>' +
       switchHtml('rmEnabled', s.enabled !== false, 'Aktifkan pengingat', 'Kirim notifikasi harian otomatis ke semua user') +
-      '<div class="rm-row"><div class="rm-txt"><b>Jam pengingat</b><span>Waktu kirim setiap hari (zona ' + esc(G.timezone || 'WIB') + ')</span></div>' +
+      '<div class="rm-row"><div class="rm-txt"><b>Jam pengingat</b><span>Dikirim pada jam ini menurut <b>waktu setempat tiap user</b> (WIB/WITA/WIT), jadi semua tim menerimanya di pagi hari masing-masing</span></div>' +
         '<input type="time" class="form-input rm-time" id="rmTime" value="' + esc(s.time || '06:00') + '"></div>' +
+      '<div class="rm-row"><div class="rm-txt"><b>Zona acuan jadwal &amp; bawaan</b><span>Jam agenda ditulis menurut zona ini, dan dipakai untuk user yang belum memilih zona. Bawaan: WITA</span></div>' +
+        '<select class="form-select rm-zone" id="rmZone">' + Object.keys(G.zones || DEF_ZONES).map(z => '<option value="' + z + '"' + (((s.zone || G.refZone) === z) ? ' selected' : '') + '>' + zLabel(z) + ' — ' + esc(zInfo(z).nama) + '</option>').join('') + '</select></div>' +
       switchHtml('rmCountdown', s.countdown !== false, 'Hitung mundur Hari H', 'Tiap pagi: “12 hari lagi menuju pemilihan” + semangat & progres suara PASTI') +
       switchHtml('rmAgenda', s.agendaReminders !== false, 'Ingatkan agenda lain', 'Kunjungan / rapat diingatkan H-1 dan di hari-H agenda') +
       pushNote +
@@ -205,7 +236,7 @@
       sw.classList.toggle('on', v); sw.setAttribute('aria-checked', v);
     }));
     const val = id => { const el = box.querySelector('#' + id); return el ? el.classList.contains('on') : true; };
-    const collect = () => ({ enabled: val('rmEnabled'), countdown: val('rmCountdown'), agendaReminders: val('rmAgenda'), time: box.querySelector('#rmTime').value });
+    const collect = () => ({ enabled: val('rmEnabled'), countdown: val('rmCountdown'), agendaReminders: val('rmAgenda'), time: box.querySelector('#rmTime').value, zone: box.querySelector('#rmZone').value });
 
     const save = box.querySelector('#rmSave');
     if (save) save.addEventListener('click', async () => {
@@ -214,7 +245,7 @@
       save.disabled = true;
       try {
         const r = await rpc('apiSaveReminderSettings', { settings: s });
-        if (r && r.ok) { G.settings = r.settings; toast('✅ Pengingat tersimpan — kirim tiap ' + r.settings.time + ' WIB', 'success'); }
+        if (r && r.ok) { G.settings = r.settings; G.refZone = r.settings.zone; toast('✅ Pengingat tersimpan — dikirim tiap ' + r.settings.time + ' waktu setempat', 'success'); }
         else toast('❌ ' + ((r && r.message) || 'Gagal menyimpan'), 'error');
       } catch (e) { toast('Gagal: ' + e.message, 'error'); }
       save.disabled = false;
@@ -281,6 +312,7 @@
     $('agLokasi').value = isEdit ? (a.lokasi || '') : '';
     $('agCatatan').value = isEdit ? (a.catatan || '') : '';
     $('agErr').textContent = '';
+    const jl = $('agJamLbl'); if (jl) jl.innerHTML = 'Jam <span class="ag-opt">(opsional, ' + esc(zLabel(G.refZone)) + ')</span>';
     m.dataset.id = isEdit ? a.id : '';
     m.classList.add('show');
     setTimeout(() => $('agJudul').focus(), 50);
@@ -321,6 +353,63 @@
     if (window.__notif) setTimeout(() => window.__notif.refresh({ silent: true }), 400);
   }
 
+
+  /* ============================================================ */
+  /* ZONA WAKTU USER (halaman Akun)                                */
+  /* ============================================================ */
+  const deviceOffset = () => -new Date().getTimezoneOffset();
+  const offsetToZone = off => Object.keys(G.zones || DEF_ZONES).find(z => zInfo(z).offset === off) || null;
+
+  function syncZone(cb) {
+    rpc('apiGetTimezone', { offsetMin: deviceOffset() }).then(r => {
+      if (r && r.ok) {
+        G.tz = { mode: r.mode, zone: r.zone, defaultZone: r.defaultZone };
+        G.userZone = r.zone; if (r.zones) G.zones = r.zones;
+      }
+    }).catch(() => {}).then(() => cb && cb(G.tz));
+  }
+
+  function zoneCardHtml() {
+    const tz = G.tz || { mode: 'auto', zone: G.userZone, defaultZone: G.refZone };
+    const det = offsetToZone(deviceOffset());
+    const opt = (val, label, sel) => '<option value="' + val + '"' + (sel ? ' selected' : '') + '>' + label + '</option>';
+    const now = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: tz.zone }).replace('.', ':');
+    return '<section class="card zone-card"><div class="card-head"><div class="card-title"><span class="ct-ico">🕒</span>Zona Waktu</div></div>' +
+      '<div class="nt-switch-row"><div><b>' + esc(zLabel(tz.zone)) + ' — ' + esc(zInfo(tz.zone).nama) + '</b>' +
+      '<span>' + (tz.mode === 'auto' ? 'Otomatis mengikuti perangkat' + (det ? ' (terdeteksi ' + zLabel(det) + ')' : ' (zona perangkat di luar Indonesia → memakai ' + zLabel(tz.defaultZone) + ')') : 'Dipilih manual') + ' • sekarang ' + esc(now) + '</span></div>' +
+      '<select class="form-select zone-sel" id="zoneSel" aria-label="Zona waktu">' +
+        opt('auto', 'Otomatis (ikuti perangkat)', tz.mode === 'auto') +
+        Object.keys(G.zones || DEF_ZONES).map(z => opt(z, zLabel(z) + ' — ' + zInfo(z).nama, tz.mode === 'manual' && tz.zone === z)).join('') +
+      '</select></div>' +
+      '<div class="nt-card-note" style="margin-top:12px">Pengingat harian dan jam agenda ditampilkan sesuai zona ini. Jika belum dipilih, aplikasi memakai zona bawaan (WITA).</div></section>';
+  }
+
+  function mountZoneCard(id) {
+    const el = $(id);
+    if (!el) return;
+    const paint = () => {
+      if (!el.isConnected) return;
+      el.innerHTML = zoneCardHtml();
+      const sel = el.querySelector('#zoneSel');
+      if (sel) sel.addEventListener('change', async () => {
+        const v = sel.value;
+        sel.disabled = true;
+        try {
+          const r = await rpc('apiSaveTimezone', v === 'auto' ? { mode: 'auto', offsetMin: deviceOffset() } : { mode: 'manual', zone: v });
+          if (r && r.ok) {
+            G.tz = { mode: r.mode, zone: r.zone, defaultZone: r.defaultZone }; G.userZone = r.zone;
+            toast('✅ Zona waktu: ' + zLabel(r.zone), 'success');
+            load(() => {}, true);
+            if (window.__notif) window.__notif.refresh({ silent: true });
+          } else toast('❌ ' + ((r && r.message) || 'Gagal menyimpan'), 'error');
+        } catch (e) { toast('Gagal: ' + e.message, 'error'); }
+        paint();
+      });
+    };
+    paint();
+    syncZone(paint);
+  }
+
   /* ---------------- pemasangan event statis ---------------- */
   function wire() {
     const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
@@ -335,5 +424,5 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
 
-  window.__agenda = { load, mountDashboard, mountSettings, openModal, reset() { G.loaded = false; G.at = 0; G.data = []; G.countdown = null; } };
+  window.__agenda = { zone: () => ({ iana: G.userZone, label: zLabel(G.userZone) }), load, mountDashboard, mountSettings, mountZoneCard, syncZone, openModal, reset() { G.loaded = false; G.at = 0; G.data = []; G.countdown = null; } };
 })();

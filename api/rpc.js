@@ -12,6 +12,7 @@ const domain = require('../lib/domain');
 const notif = require('../lib/notif');
 const push = require('../lib/push');
 const reminder = require('../lib/reminder');
+const prefs = require('../lib/prefs');
 
 const WRITE_ACTIONS = new Set([
   'add', 'update', 'delete', 'verifyWithTTD', 'unverify',
@@ -288,15 +289,16 @@ module.exports = async (req, res) => {
         if (r.ok) {
           const a = r.agenda;
           await store.logAksi(r.isNew ? 'AGENDA_ADD' : 'AGENDA_UPDATE', session.username, a.judul + ' / ' + a.tanggal);
-          const days = reminder.diffDays(a.tanggal, reminder.tzNow().date);
+          const days = reminder.diffDays(a.tanggal, reminder.tzNow(undefined, await prefs.getDefaultZone()).date);
+          const detail = await reminder.describe(a);
           const sisa = days > 0 ? ' (' + days + ' hari lagi)' : (days === 0 ? ' (hari ini)' : '');
           await notif.notify(a.jenis === 'pemilihan' ? {
             type: 'agenda', title: r.isNew ? '🗳️ Hari pemilihan ditetapkan' : '🗳️ Jadwal pemilihan diperbarui',
-            message: a.judul + ': ' + reminder.detailAgenda(a) + sisa + '. Ditetapkan oleh ' + actorName + '.',
+            message: a.judul + ': ' + detail + sisa + '. Ditetapkan oleh ' + actorName + '.',
             actor, audience: 'all'
           } : {
             type: 'agenda', title: (r.isNew ? 'Agenda baru: ' : 'Agenda diperbarui: ') + a.judul,
-            message: reminder.detailAgenda(a) + sisa + '. Oleh ' + actorName + '.',
+            message: detail + sisa + '. Oleh ' + actorName + '.',
             actor, audience: 'all'
           });
         }
@@ -319,6 +321,8 @@ module.exports = async (req, res) => {
         if (r.ok) await store.logAksi('REMINDER_SETTINGS', session.username, 'Jam ' + r.settings.time + (r.settings.enabled ? ' aktif' : ' nonaktif'));
         break;
       }
+      case 'getTimezone': r = Object.assign({ ok: true }, await prefs.syncUser(session.username, params.offsetMin), { zones: prefs.ZONES }); break;
+      case 'saveTimezone': r = await prefs.saveUser(session.username, params.mode, params.zone, params.offsetMin); break;
       case 'reminderTest':   r = await reminder.sendTest(session); break;
       case 'runReminders': {
         const res = await reminder.run({ force: true });

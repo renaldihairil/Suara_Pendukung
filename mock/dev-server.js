@@ -84,9 +84,10 @@ const sheetsApi = {
         const m = String(opts.range).match(/^'(.+)'!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
         const title = m[1];
         const r1 = parseInt(m[3], 10), c1 = colToIndex(m[2]);
-        const c2 = m[4] ? colToIndex(m[4]) : c1;
         const rows = mockSheets[title];
         const vals = opts.resource.values.map(r => r.slice());
+        // Google menulis sepanjang data bila range hanya menyebut sel awal (mis. A5)
+        const c2 = m[4] ? colToIndex(m[4]) : c1 + Math.max(0, (vals[0] || []).length - 1);
         for (let i = 0; i < vals.length; i++) {
           const rowNum = r1 + i;
           while (rows.length < rowNum) rows.push([]);

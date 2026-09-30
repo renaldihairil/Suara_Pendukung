@@ -515,6 +515,7 @@
     N.started = true;
     N.known = {}; N.loaded = false; N.items = []; N.unread = 0;
     updateBadges();
+    if (window.__agenda && window.__agenda.syncZone) window.__agenda.syncZone(); // simpan/ikuti zona waktu perangkat
     fetchNotifs({ silent: true }).then(() => { detectPush(); });
     N.timer = setInterval(() => { if (!document.hidden) fetchNotifs(); }, POLL_MS);
     document.addEventListener('visibilitychange', onVisible);

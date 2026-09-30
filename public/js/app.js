@@ -802,15 +802,16 @@
       warnHtml = '<div class="alert alert-danger">' + ICONS.warn + '<div>Ada <b>' + d.unknownKampung + '</b> kampung di database yang tidak ada di daftar pengaturan. Buka <b>Atur</b> untuk memperbarui.</div></div>';
     }
 
+    const zn = window.__agenda ? window.__agenda.zone() : { iana: 'Asia/Makassar', label: 'WITA' };
     const now = new Date();
-    const tgl = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta' });
-    const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }).replace('.', ':');
+    const tgl = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: zn.iana });
+    const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: zn.iana }).replace('.', ':');
     const nama = state.user ? (state.user.nama || state.user.username) : '';
 
     const dateCard =
       '<div class="date-chip">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' +
-        '<div><div class="dc-d">' + esc(tgl) + '</div><div class="dc-t">' + esc(jam) + ' WIB</div></div>' +
+        '<div><div class="dc-d">' + esc(tgl) + '</div><div class="dc-t">' + esc(jam) + ' ' + esc(zn.label) + '</div></div>' +
       '</div>';
 
     const totalCard =
