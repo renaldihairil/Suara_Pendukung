@@ -168,7 +168,8 @@ process.env.APPSCRIPT_PHOTO_KEY = process.env.APPSCRIPT_PHOTO_KEY || 'kunci-uji-
       if (process.env.MOCK_GW_HTML) return { ok: true, status: 200, text: async () => '<html>Login</html>' };
       const req = JSON.parse((opt && opt.body) || '{}');
       // Uji: Apps Script lambat (MOCK_GW_DELAY_MS untuk op ocr); menghormati AbortSignal seperti fetch asli
-      const delay = req.op === 'ocr' ? Number(process.env.MOCK_GW_DELAY_MS || 0) : 0;
+      global.__gwgets = (global.__gwgets || 0) + (req.op === 'get' ? 1 : 0);
+      const delay = req.op === 'ocr' ? Number(process.env.MOCK_GW_DELAY_MS || 0) : req.op === 'get' ? Number(process.env.MOCK_GW_GET_DELAY_MS || 0) : 0;
       if (delay) {
         await new Promise((resolve, reject) => {
           const t = setTimeout(resolve, delay);
@@ -208,7 +209,7 @@ process.env.APPSCRIPT_PHOTO_KEY = process.env.APPSCRIPT_PHOTO_KEY || 'kunci-uji-
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
   try {
-    if (u.pathname === '/__gcalls') { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ n: global.__gcalls })); }
+    if (u.pathname === '/__gcalls') { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ n: global.__gcalls, gets: global.__gwgets || 0 })); }
     if (u.pathname === '/api/rpc') return await require('../api/rpc')(req, res);
     if (u.pathname === '/api/auth') return await require('../api/auth')(req, res);
     if (u.pathname === '/api/photo') return await require('../api/photo')(req, res);

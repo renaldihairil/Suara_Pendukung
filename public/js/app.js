@@ -531,6 +531,10 @@
     try {
       ['pendukung_auth', 'pendukung_user', 'pendukung_cache_v1', 'pendukung_cache_at', 'pendukung_cache_version', 'pendukung_config'].forEach(k => sessionStorage.removeItem(k));
     } catch (e) {}
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'clear-photos' });
+      if (window.caches) caches.delete('pendukung-foto-v1');
+    } catch (e) {}
     fetch('/api/auth', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'logout' }) })
       .catch(() => {})
       .then(() => location.reload());
@@ -1383,16 +1387,9 @@
       if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = originalHtml; }
     };
 
-    google.script.run
-      .withSuccessHandler(r => {
-        if (!r.ok) { toast('Gagal ambil foto KTP: ' + r.message, 'error'); finish(); return; }
-        buildKtpPdf(p, r.dataUrl, finish);
-      })
-      .withFailureHandler(e => {
-        toast('Gagal: ' + e.message, 'error');
-        finish();
-      })
-      .apiGetFotoBase64(p.fotoKTPId);
+    fetchFotoUrl(p)
+      .then(u => buildKtpPdf(p, u, () => { if (String(u).startsWith('blob:')) URL.revokeObjectURL(u); finish(); }))
+      .catch(e => { toast('Gagal ambil foto KTP: ' + e.message, 'error'); finish(); });
   };
 
   // ⭐ Render ulang gambar lewat canvas → JPEG. Decoder PNG bawaan jsPDF kadang
@@ -1457,7 +1454,7 @@
     loadImage(dataUrl)
       .then(img => {
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-        drawKtpA4Page(doc, imgToJpeg(img), p);
+        drawKtpA4Page(doc, imgToJpeg(img, 1200), p);
         doc.save('KTP_' + slugify(p.nama) + '_' + (p.nik || '') + '.pdf');
         toast('✅ PDF KTP siap di-print (A4)', 'success');
       })
@@ -1574,13 +1571,21 @@
     $('modalBulkKtp').classList.remove('show');
   }
 
-  function fetchFotoBase64(fileId) {
-    return new Promise((resolve, reject) => {
+  // Ambil foto KTP sebagai URL objek lewat /api/photo (ter-cache di perangkat & CDN → cepat),
+  // cadangan: RPC base64 bila URL tidak tersedia/gagal.
+  function fetchFotoUrl(p) {
+    const url = (p && p.fotoKTP) || (p && p.fotoKTPId ? '/api/photo?id=' + encodeURIComponent(p.fotoKTPId) : '');
+    const viaRpc = () => new Promise((resolve, reject) => {
       google.script.run
         .withSuccessHandler(r => r && r.ok ? resolve(r.dataUrl) : reject(new Error((r && r.message) || 'Gagal ambil foto')))
         .withFailureHandler(e => reject(e))
-        .apiGetFotoBase64(fileId);
+        .apiGetFotoBase64(p.fotoKTPId);
     });
+    if (!url) return viaRpc();
+    return fetch(url, { credentials: 'same-origin' })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+      .then(b => URL.createObjectURL(b))
+      .catch(() => viaRpc());
   }
 
   function runBulkKtp(list, wantPrinted, markAfter) {
@@ -1607,20 +1612,20 @@
     };
     updateProgress();
 
-    // Ambil foto paralel terbatas (3 sekaligus) supaya cepat tapi tidak membebani Apps Script
+    // Ambil foto paralel (5 sekaligus); foto yang sudah ter-cache (perangkat/CDN) langsung tersedia
     let next = 0;
     const worker = () => {
       if (job.cancelled || next >= total) return Promise.resolve();
       const idx = next++;
       const p = list[idx];
-      return fetchFotoBase64(p.fotoKTPId)
-        .then(loadImage)
-        .then(img => { images[idx] = imgToJpeg(img, 1600); })
+      return fetchFotoUrl(p)
+        .then(u => loadImage(u).finally(() => { if (u.startsWith('blob:')) URL.revokeObjectURL(u); }))
+        .then(img => { images[idx] = imgToJpeg(img, 1200); })
         .catch(err => { console.warn('KTP gagal:', p.nama, err); failed.push(p); })
         .then(() => { doneCount++; updateProgress(); return worker(); });
     };
 
-    Promise.all([worker(), worker(), worker()])
+    Promise.all([worker(), worker(), worker(), worker(), worker()])
       .then(() => {
         if (job.cancelled) { toast('Download KTP massal dibatalkan', 'warn'); return; }
 
@@ -1790,7 +1795,7 @@
       handleNikInput(fNik.value, null);
     });
 
-    $('btnKamera').addEventListener('click', openKtpCamera);
+    $('btnKamera').addEventListener('click', () => openKtpCamera('input'));
     $('btnGaleri').addEventListener('click', () => $('galleryInput').click());
     $('cameraInput').onchange = handleGalleryFileForCrop;
     $('galleryInput').onchange = handleGalleryFileForCrop;
@@ -1885,13 +1890,16 @@
     img.src = dataUrl;
   }
 
-  function handleGalleryFileForCrop(e) {
+  function handleGalleryFileForCrop(e, target) {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 15 * 1024 * 1024) { toast('Foto maksimal 15 MB', 'error'); e.target.value = ''; return; }
     const reader = new FileReader();
     reader.onload = ev => {
-      downscaleDataUrl(ev.target.result, 2600, src => { state.fotoSrc = src; openCropModal(src); });
+      downscaleDataUrl(ev.target.result, 2600, src => {
+        if (target === 'edit') state.editFotoSrc = src; else state.fotoSrc = src;
+        openCropModal(src, target);
+      });
       e.target.value = '';
     };
     reader.onerror = () => { toast('Gagal membaca file foto', 'error'); e.target.value = ''; };
@@ -1899,18 +1907,46 @@
   }
 
   // Kamera langsung dengan bingkai ukuran KTP; bila tak tersedia/ditolak → kamera bawaan HP (+ editor)
-  function openKtpCamera() {
-    if (!window.KtpCapture || !KtpCapture.supported()) { $('cameraInput').click(); return; }
+  function openKtpCamera(target) {
+    const isEdit = target === 'edit';
+    const fallback = () => $(isEdit ? 'editCameraInput' : 'cameraInput').click();
+    if (!window.KtpCapture || !KtpCapture.supported()) { fallback(); return; }
     KtpCapture.open({
       onCapture: (dataUrl, q) => {
-        state.fotoSrc = dataUrl;
-        finalizeFotoKTP(dataUrl, dataUrl);
+        if (isEdit) { state.editFotoSrc = dataUrl; setEditFoto(dataUrl); }
+        else { state.fotoSrc = dataUrl; finalizeFotoKTP(dataUrl, dataUrl); }
         if (q && !q.ok) toast('⚠️ ' + q.tips[0], 'warn');
       },
       onError: reason => {
         if (reason === 'denied') toast('Izin kamera ditolak — memakai kamera bawaan. Izinkan kamera di pengaturan browser untuk bingkai KTP.', 'warn');
-        $('cameraInput').click();
+        fallback();
       }
+    });
+  }
+
+  // Putar/crop foto KTP yang SUDAH tersimpan (modal Edit)
+  function openCropFromUrl(url) {
+    toast('Memuat foto…', 'info');
+    fetch(url, { credentials: 'same-origin' })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+      .then(b => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(b); }))
+      .then(d => { state.editFotoSrc = d; openCropModal(d, 'edit'); })
+      .catch(e => toast('Gagal memuat foto: ' + e.message, 'error'));
+  }
+
+  // Foto KTP baru di modal Edit (hasil kamera berbingkai / editor putar-crop)
+  function setEditFoto(dataUrl) {
+    downscaleDataUrl(dataUrl, 1200, small => {
+      state.fotoBase64 = small;
+      state.fotoMime = 'image/jpeg';
+      const pv = $('eFotoPreview');
+      if (!pv) return;
+      pv.src = small;
+      pv.style.display = 'block';
+      $('eFotoPlaceholder').style.display = 'none';
+      $('eFotoBox').classList.add('has-foto');
+      const t = $('eFotoTools');
+      if (t) t.classList.add('show');
     });
   }
 
@@ -1951,8 +1987,10 @@
   let cropperInstance = null;
   let cropIsFreeRatio = false;
   let cropRotBase = 0;   // kelipatan 90°
+  let cropTarget = 'input';   // 'input' (form Input) | 'edit' (modal Edit)
 
-  function openCropModal(dataUrl) {
+  function openCropModal(dataUrl, target) {
+    cropTarget = target === 'edit' ? 'edit' : 'input';
     const modal = $('modalCropFoto');
     const img = $('cropImgEl');
     if (cropperInstance) { cropperInstance.destroy(); cropperInstance = null; }
@@ -2419,6 +2457,8 @@
     const startIdx = (state.currentPage - 1) * PER_PAGE;
     const endIdx = Math.min(startIdx + PER_PAGE, totalFiltered);
     const pageItems = filtered.slice(startIdx, endIdx);
+    clearTimeout(state._prefetchT);
+    state._prefetchT = setTimeout(() => prefetchPhotosOf(pageItems), 900);   // foto data di layar dimuat di latar
 
     if (info) {
       const totalAll = (state.allData || []).length;
@@ -2580,6 +2620,12 @@
     // klik diproses berkali-kali (fatal untuk ceklist: centang langsung terlepas lagi).
     if (container._gridBound) return;
     container._gridBound = true;
+    // Sentuhan pertama pada kartu → mulai muat foto (±100–300 ms lebih awal dari klik)
+    container.addEventListener('pointerdown', e => {
+      const el = e.target.closest('[data-open-detail], [data-id]');
+      const id = el && (el.getAttribute('data-open-detail') || el.getAttribute('data-id'));
+      if (id) prefetchById(id);
+    }, { passive: true });
     container.addEventListener('click', e => {
       // Mode ceklist massal: klik di mana pun pada kartu = pilih / batal pilih
       if (state.sel.on) {
@@ -2784,6 +2830,7 @@
     if (!p) { toast('Data tidak ditemukan', 'error'); return; }
 
     state.detailWargaId = id;
+    prefetchById(id);
     renderModalDetailWarga(p);
     $('modalDetailWarga').classList.add('show');
   };
@@ -2830,7 +2877,7 @@
       '<div class="warga-section">' +
         '<div class="warga-section-title">' + ICONS.card + ' Foto KTP</div>' +
         (fotoKTP
-          ? '<img class="warga-foto" src="' + esc(fotoKTP) + '" alt="Foto KTP ' + esc(p.nama) + '" onclick="window.__showFoto(\'' + esc(fotoKTP) + '\')">'
+          ? '<div class="foto-wrap is-loading"><span class="foto-spin"></span><img class="warga-foto" fetchpriority="high" decoding="async" src="' + esc(fotoKTP) + '" alt="Foto KTP ' + esc(p.nama) + '" onload="this.parentNode.classList.remove(\'is-loading\')" onerror="this.parentNode.classList.remove(\'is-loading\');this.parentNode.classList.add(\'is-err\')" onclick="window.__showFoto(\'' + esc(fotoKTP) + '\')"></div>'
           : '<div class="warga-foto-empty">📷 Belum ada foto KTP</div>'
         ) +
       '</div>' +
@@ -2838,7 +2885,7 @@
       '<div class="warga-section">' +
         '<div class="warga-section-title">' + ICONS.ttd + ' Bukti Fotokopi KTP yang Ditandatangani</div>' +
         (fotoTTD
-          ? '<img class="warga-foto" src="' + esc(fotoTTD) + '" alt="Bukti TTD ' + esc(p.nama) + '" onclick="window.__showFoto(\'' + esc(fotoTTD) + '\')">' +
+          ? '<div class="foto-wrap is-loading"><span class="foto-spin"></span><img class="warga-foto" decoding="async" src="' + esc(fotoTTD) + '" alt="Bukti TTD ' + esc(p.nama) + '" onload="this.parentNode.classList.remove(\'is-loading\')" onerror="this.parentNode.classList.remove(\'is-loading\');this.parentNode.classList.add(\'is-err\')" onclick="window.__showFoto(\'' + esc(fotoTTD) + '\')"></div>' +
             '<div class="warga-ttd-note">✅ Sudah diverifikasi dengan bukti TTD</div>'
           : '<div class="warga-foto-empty">' +
               (isVerified
@@ -3135,6 +3182,43 @@
   }
 
   // ============================================================ //
+  // ⭐ PREFETCH FOTO — foto mulai dimuat SEBELUM detail dibuka      //
+  // (disimpan cache perangkat oleh service worker & CDN Vercel)    //
+  // ============================================================ //
+  const photoPrefetched = new Set();
+  const photoQueue = [];
+  let photoActive = 0;
+  function saveDataMode() {
+    const c = navigator.connection;
+    return !!(c && (c.saveData || /2g/.test(c.effectiveType || '')));
+  }
+  function prefetchPhoto(url, urgent) {
+    if (!url || photoPrefetched.has(url)) return;
+    photoPrefetched.add(url);
+    if (urgent) photoQueue.unshift(url); else photoQueue.push(url);
+    pumpPhotoQueue();
+  }
+  function pumpPhotoQueue() {
+    while (photoActive < 3 && photoQueue.length) {
+      const url = photoQueue.shift();
+      photoActive++;
+      fetch(url, { credentials: 'same-origin' })
+        .then(r => r.blob())       // isi dibaca penuh → tersimpan di cache
+        .catch(() => { photoPrefetched.delete(url); })
+        .finally(() => { photoActive--; pumpPhotoQueue(); });
+    }
+  }
+  function prefetchPhotosOf(items) {
+    if (saveDataMode()) return;
+    (items || []).slice(0, PER_PAGE).forEach(p => { if (p && p.fotoKTP) prefetchPhoto(p.fotoKTP); });
+  }
+  function prefetchById(id) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (p && p.fotoKTP) prefetchPhoto(p.fotoKTP, true);
+    if (p && p.fotoTTD) prefetchPhoto(p.fotoTTD, true);
+  }
+
+  // ============================================================ //
   // EDIT & DELETE                                                 //
   // ============================================================ //
   window.__showFoto = function(url) {
@@ -3285,6 +3369,9 @@
             '<button type="button" class="foto-btn" id="eBtnGaleri">' + ICONS.gallery + 'Galeri</button>' +
           '</div>' +
         '</div>' +
+        '<div class="foto-tools" id="eFotoTools">' +
+          '<button type="button" id="eBtnFotoEdit">' + ICONS.card + 'Putar / Crop</button>' +
+        '</div>' +
       '</div>' +
       buktiTTDHtml +
       '<div class="confirm-btns">' +
@@ -3349,10 +3436,16 @@
       }, 300);
     });
 
-    $('eBtnKamera').addEventListener('click', () => $('editCameraInput').click());
+    // Sama dengan halaman Input: kamera berbingkai KTP + editor putar/crop fleksibel
+    state.editFotoSrc = null;
+    $('eBtnKamera').addEventListener('click', () => openKtpCamera('edit'));
     $('eBtnGaleri').addEventListener('click', () => $('editGalleryInput').click());
-    $('editCameraInput').onchange = handleEditInput;
-    $('editGalleryInput').onchange = handleEditInput;
+    $('editCameraInput').onchange = e => handleGalleryFileForCrop(e, 'edit');
+    $('editGalleryInput').onchange = e => handleGalleryFileForCrop(e, 'edit');
+    $('eBtnFotoEdit').addEventListener('click', () => {
+      if (state.editFotoSrc) openCropModal(state.editFotoSrc, 'edit');
+      else if (p.fotoKTP) openCropFromUrl(p.fotoKTP);
+    });
 
     if (isVerified) {
       const btnTTDKamera = $('eBtnTTDKamera');
@@ -3392,33 +3485,6 @@
     $('eSave').addEventListener('click', saveEdit);
 
     $('modalEdit').classList.add('show');
-  }
-
-  function handleEditInput(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 8 * 1024 * 1024) {
-      toast('Foto maksimal 8 MB', 'error');
-      e.target.value = '';
-      return;
-    }
-    compressImage(file, (base64, mime) => {
-      if (!base64) {
-        toast('Gagal memproses foto', 'error');
-        e.target.value = '';
-        return;
-      }
-      state.fotoBase64 = base64;
-      state.fotoMime = mime;
-      const pv = $('eFotoPreview');
-      if (pv) {
-        pv.src = base64;
-        pv.style.display = 'block';
-        $('eFotoPlaceholder').style.display = 'none';
-        $('eFotoBox').classList.add('has-foto');
-      }
-      e.target.value = '';
-    });
   }
 
   function handleEditTTDInput(e) {
@@ -4248,8 +4314,9 @@
     });
     if (!canvas) { toast('Gagal memproses foto', 'error'); return; }
     const hi = canvas.toDataURL('image/jpeg', 0.92);
+    const target = cropTarget;
     closeCropModal();
-    finalizeFotoKTP(hi, hi);
+    if (target === 'edit') setEditFoto(hi); else finalizeFotoKTP(hi, hi);
   });
 
   // ============================================================ //

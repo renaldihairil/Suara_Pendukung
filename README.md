@@ -123,6 +123,7 @@ Lalu: **Simpan** → jalankan **`pgwAuthorize`** (dialog izin kini memuat keempa
 - **Hari H Pemilihan**: Admin atur di *Atur → Hari H Pemilihan* (tanggal, jam, lokasi, zona WITA) → banner hitung mundur di Dashboard.
 - **Foto KTP**: *Kamera* dengan bingkai rasio KTP (hanya isi bingkai yang tersimpan; indikator gelap/silau/buram, senter, zoom) atau *Galeri*; editor putar 90°, miringkan −45°…+45°, zoom, crop rasio KTP/bebas.
 - **Baca otomatis Nama & NIK**: OCR bawaan Google Drive lewat jembatan (gratis), cadangan OCR.space. Hasil hanya **mengisi form**; NIK divalidasi (kode wilayah, tanggal lahir, silang-cek dengan tanggal lahir di KTP); NIK yang tidak 16 digit ditolak, bukan ditebak. Foto tak jelas → isi manual.
+- **Edit data** memakai kamera berbingkai KTP dan editor putar/crop yang sama dengan halaman Input (termasuk putar/crop foto yang sudah tersimpan).
 - **Bila foto gagal diunggah**, data **tetap tersimpan** dengan peringatan; foto bisa diunggah ulang lewat *Edit*. Saat edit, foto lama dibuang hanya setelah foto baru sukses.
 
 ## 7. Kinerja
@@ -132,7 +133,9 @@ Lalu: **Simpan** → jalankan **`pgwAuthorize`** (dialog izin kini memuat keempa
 - **Satu permintaan setelah login** (`getBootstrap`): config + dashboard + daftar + versi + badge duplikat + aktivitas terbaru dalam satu panggilan (dulu 5–6 permintaan terpisah).
 - **Cache baca sheet** (`lib/gsheets.js`, TTL 5–10 dtk). Bacaan sebelum **menulis** selalu *fresh*. Perubahan dari aplikasi Apps Script lama tampil ≤ 10 dtk.
 - **Region fungsi Singapura** (`"regions": ["sin1"]` di `vercel.json`) — terdekat ke Indonesia.
-- Foto di-cache privat 1 hari; pustaka PDF/crop `defer`; font tidak memblokir render; service worker men-cache *app shell*.
+- **Foto cepat**: URL foto bertanda tangan (HMAC, berganti mingguan, berlaku ≤ 14 hari) → di-cache **CDN Vercel** dan **perangkat** (service worker, dihapus saat logout) + cache memori di server. Foto data di layar dan foto yang disentuh di-*prefetch* sehingga detail tampil instan. URL foto tanpa tanda tangan tetap wajib login.
+- **Unduh PDF A4** memakai foto yang sama dari cache (bukan RPC terpisah), unduhan massal 5 foto sekaligus.
+- Pustaka PDF/crop `defer`; font tidak memblokir render; service worker men-cache *app shell*.
 - Server selalu membalas JSON; bila Vercel memotong/gagal, layar login menampilkan pesan jelas (bukan teks error mentah).
 - Kuota Google Sheets 60 baca/menit: bila terlampaui muncul *"Server sedang sibuk"* dan pulih sendiri ±1 menit.
 

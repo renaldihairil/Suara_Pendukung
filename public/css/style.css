@@ -1562,3 +1562,16 @@ body.kcam-open{overflow:hidden}
 input.auto-fill{background:#f0fdf4 !important;border-color:#86efac !important}
 .foto-tools svg{width:16px !important;height:16px !important;flex:none}
 .foto-tools button{font-size:12.5px;white-space:nowrap}
+
+/* ===== Foto detail: indikator muat ===== */
+.foto-wrap{position:relative;min-height:120px;border-radius:12px;background:linear-gradient(100deg,#eef2f9 30%,#f7f9fd 50%,#eef2f9 70%);background-size:300% 100%}
+.foto-wrap.is-loading{animation:fotoShimmer 1.2s linear infinite}
+.foto-wrap:not(.is-loading){background:none;min-height:0}
+.foto-wrap.is-loading .warga-foto{opacity:0}
+.foto-wrap .warga-foto{transition:opacity .2s}
+.foto-spin{display:none;position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;border:3px solid rgba(37,99,235,.2);border-top-color:#2563eb;border-radius:50%;animation:ocrspin .8s linear infinite}
+.foto-wrap.is-loading .foto-spin{display:block}
+.foto-wrap.is-err::after{content:'Foto gagal dimuat — coba buka lagi';display:block;padding:24px 8px;text-align:center;font-size:12.5px;color:#b91c1c}
+@keyframes fotoShimmer{0%{background-position:100% 0}100%{background-position:0 0}}
+/* Editor crop & kamera harus di atas modal Edit */
+#modalCropFoto{z-index:260}
