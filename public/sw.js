@@ -3,9 +3,12 @@
  * Strategi:
  *  - App shell & vendor  : cache-first (precache saat install)
  *  - Navigasi (HTML)     : network-first → fallback cache → offline.html
- *  - /api/*              : network-only (data selalu fresh; foto no-store)
+ *  - /api/photo          : cache-first di perangkat (dihapus saat logout)
+ *  - /api/* lainnya      : network-only (data selalu fresh)
  * ============================================================ */
-const VERSION = 'pendukung-v16';
+const VERSION = 'pendukung-v18';
+const PHOTO_CACHE = 'pendukung-foto-v1';   // foto KTP/TTD (id file tak pernah berubah) — dihapus saat logout
+const PHOTO_MAX = 400;                      // batas jumlah foto tersimpan di perangkat
 const SHELL = [
   '/',
   '/index.html',
@@ -43,7 +46,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k !== VERSION && k !== PHOTO_CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -55,7 +58,13 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // abaikan resource eksternal
 
-  // API & foto: selalu network (data realtime; foto sensitif no-store)
+  // Foto: cache-first di perangkat (kunci = id file saja, tanda tangan URL berganti mingguan)
+  if (url.pathname === '/api/photo' && url.searchParams.get('id') && url.searchParams.get('download') !== '1') {
+    event.respondWith(photoFromCache(req, url.searchParams.get('id')));
+    return;
+  }
+
+  // API lain: selalu network (data realtime)
   if (url.pathname.startsWith('/api/')) return;
 
   // Navigasi halaman: network-first
@@ -93,4 +102,25 @@ self.addEventListener('fetch', (event) => {
       }).catch(() => new Response('', { status: 504 }));
     })
   );
+});
+
+async function photoFromCache(req, id) {
+  const key = '/__foto/' + encodeURIComponent(id);
+  const cache = await caches.open(PHOTO_CACHE);
+  const hit = await cache.match(key);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res && res.ok && (res.headers.get('Content-Type') || '').startsWith('image/')) {
+    try {
+      await cache.put(key, res.clone());
+      const keys = await cache.keys();
+      for (let i = 0; i < keys.length - PHOTO_MAX; i++) await cache.delete(keys[i]);   // buang yang tertua
+    } catch (e) { /* kuota penyimpanan penuh → abaikan */ }
+  }
+  return res;
+}
+
+// Logout: hapus foto tersimpan (privasi di perangkat bersama)
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'clear-photos') event.waitUntil(caches.delete(PHOTO_CACHE));
 });
