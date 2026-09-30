@@ -33,6 +33,21 @@ function pgwAuthorize() {
   Logger.log('Izin OK untuk: ' + email);
 }
 
+/**
+ * Ambil teks dari Google Doc hasil OCR. Utama: ekspor lewat Drive API (memakai izin Drive yang sudah ada,
+ * TANPA izin Dokumen). Cadangan: DocumentApp (butuh izin Dokumen).
+ */
+function pgw_docText_(docId) {
+  try {
+    if (typeof Drive !== 'undefined' && Drive.Files && Drive.Files.export) {      // Drive API v3
+      const ex = Drive.Files.export(docId, 'text/plain');
+      const t = (typeof ex === 'string') ? ex : (ex && ex.getDataAsString ? ex.getDataAsString() : (ex ? String(ex) : ''));
+      if (t && t.trim()) return t;
+    }
+  } catch (err) { /* lanjut ke cadangan */ }
+  return DocumentApp.openById(docId).getBody().getText();
+}
+
 function pgw_out_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -110,8 +125,7 @@ function pgw_handle_(req) {
         let doc;
         try { doc = convert('id'); } catch (e1) { doc = convert(''); }   // bahasa Indonesia; bila ditolak → otomatis
         try {
-          const text = DocumentApp.openById(doc.id).getBody().getText();
-          return pgw_out_({ ok: true, text: text });
+          return pgw_out_({ ok: true, text: pgw_docText_(doc.id) });
         } finally {
           try { DriveApp.getFileById(doc.id).setTrashed(true); } catch (e2) { /* abaikan */ }
         }
