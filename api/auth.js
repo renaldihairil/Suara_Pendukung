@@ -84,7 +84,7 @@ async function handler(req, res) {
   if (op === 'logout') {
     const session = auth.getSessionFromReq(req);
     if (session) {
-      try { await store.logAksi('LOGOUT', session.username, 'Logout'); } catch (e) { /* abaikan */ }
+      try { await store.logAksi('LOGOUT', session, 'Logout'); } catch (e) { /* abaikan */ }
     }
     res.setHeader('Set-Cookie', auth.clearSessionCookie());
     return json(res, 200, { ok: true });
@@ -109,7 +109,7 @@ async function handler(req, res) {
     // dua tulisan kecil dijalankan BERSAMAAN (tidak berurutan) agar login cepat
     await Promise.all([
       auth.touchLastLogin(result.user),
-      store.logAksi('LOGIN', result.user.username, 'Login berhasil')
+      store.logAksi('LOGIN', result.user, 'Login berhasil')
     ]);
     res.setHeader('Set-Cookie', auth.sessionCookie(auth.signSession(result.user)));
     return json(res, 200, {

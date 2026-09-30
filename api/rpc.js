@@ -10,13 +10,11 @@ const sheets = require('../lib/gsheets');
 const drive = require('../lib/gdrive');
 const ocr = require('../lib/ocr');
 const ktp = require('../lib/ktp');
+const roles = require('../lib/roles');
 
-const WRITE_ACTIONS = new Set([
-  'add', 'update', 'delete', 'verifyWithTTD', 'unverify',
-  'togglePrint', 'setPrintBatch', 'saveConfig', 'renameKampung',
-  'saveUsers', 'resetUserPassword', 'updateUser', 'saveHariH'
-]);
-const ADMIN_ONLY_READ = new Set(['getUsers', 'getLogs']);
+const DOWNLOAD_JENIS = { KTP: 'DOWNLOAD_KTP', KTP_MASSAL: 'DOWNLOAD_KTP_MASSAL', PDF_KAMPUNG: 'DOWNLOAD_PDF' };
+const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n || 200);
+const siapa = (nama, id) => (nama ? nama : 'ID ' + id);
 
 function json(res, status, obj) {
   res.statusCode = status;
@@ -70,13 +68,22 @@ module.exports = async (req, res) => {
     ARG_NAMES[action].forEach((k, i) => { if (params[k] === undefined) params[k] = params.args[i]; });
   }
 
-  const session = auth.getSessionFromReq(req);
-  if (!session) return json(res, 401, { ok: false, message: 'Unauthorized' });
-
-  if ((WRITE_ACTIONS.has(action) || ADMIN_ONLY_READ.has(action)) && session.role !== 'admin') {
-    await store.logAksi('AKSES_DITOLAK', session.username, 'Coba aksi: ' + action);
-    return json(res, 403, { ok: false, message: 'Aksi ini khusus admin' });
+  // Peran diambil dari sheet Users (bukan hanya token) → perubahan peran/nonaktif langsung berlaku
+  const session = await auth.resolveSession(auth.getSessionFromReq(req));
+  if (!session) {
+    res.setHeader('Set-Cookie', auth.clearSessionCookie());
+    return json(res, 401, { ok: false, message: 'Unauthorized' });
   }
+
+  if (!roles.can(session.role, action)) {
+    await store.logAksi('AKSES_DITOLAK', session, 'Coba aksi: ' + action);
+    return json(res, 403, {
+      ok: false, denied: true, role: session.role,
+      message: session.role === 'operator' ? 'Aksi ini khusus Super Admin' : 'Akun Anda hanya bisa melihat data'
+    });
+  }
+  const isSuper = session.role === 'admin';
+  const me = { username: session.username, nama: session.nama, role: session.role };
 
   try {
     let r;
@@ -85,7 +92,7 @@ module.exports = async (req, res) => {
       case 'list':
       case 'getList':       r = await store.getList(params); break;
       case 'bootstrap':
-      case 'getBootstrap':  r = await store.getBootstrap({ withLogs: session.role === 'admin', fresh: !!params.fresh }); break;
+      case 'getBootstrap':  r = await store.getBootstrap({ withLogs: isSuper, fresh: !!params.fresh }); r.me = me; break;
       case 'dashboard':
       case 'getDashboard':  r = await store.getDashboard(); break;
       case 'version':
@@ -128,59 +135,77 @@ module.exports = async (req, res) => {
         break;
       }
 
-      /* ============ WRITE (admin only, sudah di-guard) ============ */
+      /* ============ WRITE: Operator & Super Admin (sudah di-guard roles.can) ============ */
       case 'add': {
         r = await store.addPendukung(params);
-        if (r.ok) await store.logAksi('ADD', session.username, params.nama + ' / ' + params.nik + ' / RT ' + (params.rt || ''));
-        break;
-      }
-      case 'update': {
-        r = await store.updatePendukung(params);
-        if (r.ok) await store.logAksi('UPDATE', session.username, params.id + ' / ' + params.nama);
-        break;
-      }
-      case 'delete': {
-        r = await store.deletePendukung(params.id);
-        if (r.ok) await store.logAksi('DELETE', session.username, String(params.id));
+        if (r.ok) await store.logAksi('ADD', session, clip(params.nama, 80) + ' / NIK ' + clip(params.nik, 20) + ' / ' + clip(params.kampung, 60) + ' RT ' + require('../lib/domain').normRT(params.rt));
         break;
       }
       case 'verifyWithTTD': {
+        const [nm] = await store.namaById(params.id);
         r = await store.verifyWithTTD(params);
-        if (r.ok) await store.logAksi('VERIFY_TTD', session.username, params.id + ' — bukti TTD diupload');
+        if (r.ok) await store.logAksi('VERIFY_TTD', session, siapa(nm, params.id) + ' → status suara PASTI (bukti TTD diupload)');
         break;
       }
       case 'unverify': {
+        const [nm] = await store.namaById(params.id);
         r = await store.unverifyPendukung(params.id);
-        if (r.ok) await store.logAksi('UNVERIFY', session.username, String(params.id));
+        if (r.ok) await store.logAksi('UNVERIFY', session, siapa(nm, params.id) + ' → status suara BELUM PASTI');
         break;
       }
       case 'togglePrint': {
+        const [nm] = await store.namaById(params.id);
         r = await store.togglePrint(params.id, params.dicetak);
-        if (r.ok) await store.logAksi('TOGGLE_CETAK', session.username, String(params.id) + ' → ' + (r.dicetak ? 'SUDAH' : 'BELUM'));
+        if (r.ok) await store.logAksi('TOGGLE_CETAK', session, siapa(nm, params.id) + ' → ' + (r.dicetak ? 'SUDAH' : 'BELUM') + ' dicetak');
         break;
       }
       case 'setPrintBatch': {
+        let ids = params.ids;
+        if (typeof ids === 'string') { try { ids = JSON.parse(ids); } catch (e) { ids = ids.split(','); } }
+        const names = (await store.namaById(Array.isArray(ids) ? ids.slice(0, 3) : [])).filter(Boolean);
         r = await store.setPrintBatch(params.ids, params.dicetak);
-        if (r.ok) await store.logAksi('CETAK_MASSAL', session.username, r.count + ' data → ' + (r.dicetak ? 'SUDAH' : 'BELUM'));
+        if (r.ok) await store.logAksi('CETAK_MASSAL', session, r.count + ' data → ' + (r.dicetak ? 'SUDAH' : 'BELUM') + ' dicetak' +
+          (names.length ? ' (' + names.join(', ') + (r.count > names.length ? ', …' : '') + ')' : ''));
+        break;
+      }
+      case 'logDownload': {
+        // Download KTP / PDF dibuat di perangkat → perangkat melaporkannya agar tercatat di Log Aktivitas
+        const aksi = DOWNLOAD_JENIS[String(params.jenis || '')];
+        if (!aksi) { r = { ok: false, message: 'Jenis download tidak dikenal' }; break; }
+        await store.logAksi(aksi, session, clip(params.keterangan, 300));
+        r = { ok: true };
+        break;
+      }
+
+      /* ============ WRITE: khusus Super Admin ============ */
+      case 'update': {
+        r = await store.updatePendukung(params);
+        if (r.ok) await store.logAksi('UPDATE', session, clip(params.nama, 80) + ' / NIK ' + clip(params.nik, 20) + ' (ID ' + clip(params.id, 40) + ')');
+        break;
+      }
+      case 'delete': {
+        const [nm] = await store.namaById(params.id);
+        r = await store.deletePendukung(params.id);
+        if (r.ok) await store.logAksi('DELETE', session, siapa(nm, params.id));
         break;
       }
       case 'saveConfig': {
         r = await store.saveConfig(params.config || params);
-        if (r.ok) await store.logAksi('SAVE_CONFIG', session.username, 'Config disimpan');
+        if (r.ok) await store.logAksi('SAVE_CONFIG', session, 'Pengaturan disimpan');
         break;
       }
       case 'saveHariH': {
         r = await store.saveHariH(params.hariH || params);
-        if (r.ok) await store.logAksi('HARI_H', session.username, r.hariH ? r.hariH.judul + ' / ' + r.hariH.tanggal : 'Hari H dihapus');
+        if (r.ok) await store.logAksi('HARI_H', session, r.hariH ? r.hariH.judul + ' / ' + r.hariH.tanggal : 'Hari H dihapus');
         break;
       }
       case 'renameKampung': {
         r = await store.renameKampung(params.oldName, params.newName);
-        if (r.ok) await store.logAksi('RENAME_KAMPUNG', session.username, params.oldName + ' → ' + params.newName);
+        if (r.ok) await store.logAksi('RENAME_KAMPUNG', session, params.oldName + ' → ' + params.newName);
         break;
       }
 
-      /* ============ MANAJEMEN USER (admin only) ============ */
+      /* ============ MANAJEMEN USER (Super Admin) ============ */
       case 'getUsers': {
         const users = await auth.listUsers();
         r = {
@@ -195,24 +220,34 @@ module.exports = async (req, res) => {
       case 'saveUsers': {
         const payload = params.user || {};
         r = await auth.createUser(payload);
-        if (r.ok) await store.logAksi('USER_ADD', session.username, payload.username + ' (' + (payload.role || 'user') + ')');
+        if (r.ok) await store.logAksi('USER_ADD', session, clip(payload.nama || payload.username, 60) + ' (@' + clip(payload.username, 30) + ') sebagai ' + roles.ROLE_LABEL[roles.normRole(payload.role)]);
         break;
       }
       case 'resetUserPassword': {
+        const target = (await auth.listUsers(false)).find(u => u.id === String(params.id));
         r = await auth.resetPassword(params.id, params.password);
-        if (r.ok) await store.logAksi('USER_RESET_PASS', session.username, String(params.id));
+        if (r.ok) await store.logAksi('USER_RESET_PASS', session, target ? target.nama + ' (@' + target.username + ')' : String(params.id));
         break;
       }
       case 'updateUser': {
+        const before = (await auth.listUsers(true)).find(u => u.id === String(params.id));
         r = await auth.updateUser(params.id, { nama: params.nama, role: params.role, aktif: params.aktif });
-        if (r.ok) await store.logAksi('USER_UPDATE', session.username, String(params.id));
+        if (r.ok) {
+          const ch = [];
+          if (before) {
+            if (params.nama != null && String(params.nama).trim() !== before.nama) ch.push('nama → ' + clip(params.nama, 60));
+            if (params.role != null && roles.normRole(params.role) !== before.role) ch.push('peran ' + roles.ROLE_LABEL[before.role] + ' → ' + roles.ROLE_LABEL[roles.normRole(params.role)]);
+            if (params.aktif != null && !!params.aktif !== before.aktif) ch.push(params.aktif ? 'diaktifkan' : 'dinonaktifkan');
+          }
+          await store.logAksi('USER_UPDATE', session, (before ? before.nama + ' (@' + before.username + ')' : String(params.id)) + (ch.length ? ': ' + ch.join(', ') : ''));
+        }
         break;
       }
 
       /* ============ SEMUA ROLE ============ */
       case 'changeOwnPassword': {
         r = await auth.changeOwnPassword(session, params.oldPassword, params.newPassword);
-        if (r.ok) await store.logAksi('GANTI_PASSWORD', session.username, 'Ganti password sendiri');
+        if (r.ok) await store.logAksi('GANTI_PASSWORD', session, 'Ganti password sendiri');
         break;
       }
       case 'getLogs': {

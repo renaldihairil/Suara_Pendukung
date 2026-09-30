@@ -1575,3 +1575,14 @@ input.auto-fill{background:#f0fdf4 !important;border-color:#86efac !important}
 @keyframes fotoShimmer{0%{background-position:100% 0}100%{background-position:0 0}}
 /* Editor crop & kamera harus di atas modal Edit */
 #modalCropFoto{z-index:260}
+
+/* ===== Hak akses 3 peran (Super Admin / Operator / User) ===== */
+.act-det{font-size:12px;color:var(--text);opacity:.8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-peran{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(59,130,246,.12);color:#2563eb;vertical-align:1px}
+.log-uname{font-size:11px;color:var(--muted)}
+.role-guide{display:grid;gap:8px;margin-top:12px}
+.role-guide-item{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:12px;line-height:1.55;color:var(--text)}
+.role-guide-item .person-verify-tag{align-self:flex-start}
+.role-hint{font-size:12px;line-height:1.55;color:var(--text);background:rgba(59,130,246,.08);border-left:3px solid #3b82f6;border-radius:8px;padding:8px 10px;margin:2px 0 6px}
+@media (min-width:900px){.role-guide{grid-template-columns:repeat(3,1fr)}}
+.person-verify-tag.role-op{background:#fef3c7;color:#92400e}
