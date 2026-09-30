@@ -32,6 +32,9 @@
     currentPage: 1,
     fotoBase64: null,
     fotoMime: null,
+    fotoSrc: null,
+    fotoOcr: null,
+    ocrToken: 0,
     editId: null,
     confirmCb: null,
     allData: null,
@@ -1701,6 +1704,11 @@
               '</div>' +
               '<button type="button" class="foto-hapus" id="btnHapusFoto" style="display:none">' + ICONS.trash + 'Hapus Foto</button>' +
             '</div>' +
+            '<div class="foto-tools" id="fotoTools">' +
+              '<button type="button" id="btnFotoEdit">' + ICONS.card + 'Putar / Crop</button>' +
+              '<button type="button" id="btnOcrUlang">' + ICONS.refresh + 'Baca Ulang Data</button>' +
+            '</div>' +
+            '<div class="ocr-st" id="ocrSt" role="status" aria-live="polite"></div>' +
           '</section>' +
 
           '<div class="form-actions">' +
@@ -1728,11 +1736,16 @@
       handleNikInput(fNik.value, null);
     });
 
-    $('btnKamera').addEventListener('click', () => $('cameraInput').click());
+    $('btnKamera').addEventListener('click', openKtpCamera);
     $('btnGaleri').addEventListener('click', () => $('galleryInput').click());
     $('cameraInput').onchange = handleGalleryFileForCrop;
     $('galleryInput').onchange = handleGalleryFileForCrop;
     $('btnHapusFoto').addEventListener('click', clearFoto);
+    $('btnFotoEdit').addEventListener('click', () => {
+      const src = state.fotoSrc || state.fotoBase64;
+      if (src) openCropModal(src);
+    });
+    $('btnOcrUlang').addEventListener('click', () => { if (state.fotoOcr || state.fotoBase64) runKtpOcr(state.fotoOcr || state.fotoBase64); });
     $('btnSubmit').addEventListener('click', submitForm);
     $('btnResetForm').addEventListener('click', () => { renderInput(); toast('Form direset', 'success'); });
   }
@@ -1800,17 +1813,51 @@
       .apiCheckNik({ nik: nik, excludeId: excludeId });
   }
 
+  // Skala-kan sumber besar (foto kamera 12MP+) agar editor tetap ringan
+  function downscaleDataUrl(dataUrl, maxSide, cb) {
+    const img = new Image();
+    img.onload = () => {
+      const m = Math.max(img.naturalWidth, img.naturalHeight);
+      if (m <= maxSide) { cb(dataUrl); return; }
+      const k = maxSide / m;
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      const g = c.getContext('2d');
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, 0, 0, c.width, c.height);
+      cb(c.toDataURL('image/jpeg', 0.92));
+    };
+    img.onerror = () => cb(dataUrl);
+    img.src = dataUrl;
+  }
+
   function handleGalleryFileForCrop(e) {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 8 * 1024 * 1024) { toast('Foto maksimal 8 MB', 'error'); e.target.value = ''; return; }
+    if (file.size > 15 * 1024 * 1024) { toast('Foto maksimal 15 MB', 'error'); e.target.value = ''; return; }
     const reader = new FileReader();
     reader.onload = ev => {
-      openCropModal(ev.target.result);
+      downscaleDataUrl(ev.target.result, 2600, src => { state.fotoSrc = src; openCropModal(src); });
       e.target.value = '';
     };
     reader.onerror = () => { toast('Gagal membaca file foto', 'error'); e.target.value = ''; };
     reader.readAsDataURL(file);
+  }
+
+  // Kamera langsung dengan bingkai ukuran KTP; bila tak tersedia/ditolak → kamera bawaan HP (+ editor)
+  function openKtpCamera() {
+    if (!window.KtpCapture || !KtpCapture.supported()) { $('cameraInput').click(); return; }
+    KtpCapture.open({
+      onCapture: (dataUrl, q) => {
+        state.fotoSrc = dataUrl;
+        finalizeFotoKTP(dataUrl, dataUrl);
+        if (q && !q.ok) toast('⚠️ ' + q.tips[0], 'warn');
+      },
+      onError: reason => {
+        if (reason === 'denied') toast('Izin kamera ditolak — memakai kamera bawaan. Izinkan kamera di pengaturan browser untuk bingkai KTP.', 'warn');
+        $('cameraInput').click();
+      }
+    });
   }
 
   function showFotoPreview(base64) {
@@ -1824,6 +1871,10 @@
   function clearFoto() {
     state.fotoBase64 = null;
     state.fotoMime = null;
+    state.fotoSrc = null;
+    state.fotoOcr = null;
+    state.ocrToken = (state.ocrToken || 0) + 1;
+    setOcrStatus('', '');
     $('fotoPreview').style.display = 'none';
     $('fotoPreview').src = '';
     $('fotoPlaceholder').style.display = 'block';
@@ -1832,33 +1883,31 @@
   }
 
   // ============================================================ //
-  // ⭐ CROP FOTO KTP (Cropper.js)                                  //
-  // Catatan: kamera live custom (getUserMedia) TIDAK BISA dipakai  //
-  // di web app Google Apps Script karena iframe pembungkus dari    //
-  // script.google.com tidak mendelegasikan izin "camera" pada      //
-  // Permissions-Policy-nya (di luar kendali kode aplikasi ini).    //
-  // Maka tombol Kamera memakai input file native (capture kamera   //
-  // OS) lalu hasilnya tetap masuk ke modal crop di bawah ini,      //
-  // supaya pengguna tetap bisa memangkas persis ke area KTP.       //
-  //                                                                //
-  // Catatan lain: fitur baca-otomatis NIK/Nama via OCR (Tesseract) //
-  // sempat dicoba tapi DIHAPUS setelah diuji dengan foto KTP asli  //
-  // — akurasinya tidak layak pakai (banyak salah baca digit NIK,   //
-  // baris Nama sering tidak terbaca sama sekali karena pola        //
-  // pengaman/background KTP mengganggu OCR). NIK & Nama diisi      //
-  // manual seperti semula. Fitur putar foto juga dihapus atas      //
-  // permintaan — editor foto sekarang hanya untuk memangkas/crop.  //
+  // ⭐ FOTO KTP: kamera berbingkai + editor putar/crop + OCR     //
+  // - Kamera langsung (ktpcam.js, getUserMedia) dengan bingkai     //
+  //   rasio KTP; hanya isi bingkai yang diambil. Bila kamera       //
+  //   tidak tersedia/izin ditolak → kamera bawaan HP lalu editor.  //
+  // - Galeri/ambil ulang: editor Cropper.js — putar 90°, miringkan //
+  //   bebas (-45°…+45°), zoom, crop rasio KTP atau bebas.          //
+  // - Setelah foto final, Nama & NIK dibaca otomatis di server     //
+  //   (api/rpc ocrKtp → Google Cloud Vision + parser lib/ktp.js)   //
+  //   dan hanya DIISIKAN ke form; foto tak jelas → isi manual.     //
   // ============================================================ //
   const KTP_RATIO = 85.6 / 53.98;
   let cropperInstance = null;
   let cropIsFreeRatio = false;
+  let cropRotBase = 0;   // kelipatan 90°
 
   function openCropModal(dataUrl) {
     const modal = $('modalCropFoto');
     const img = $('cropImgEl');
     if (cropperInstance) { cropperInstance.destroy(); cropperInstance = null; }
     cropIsFreeRatio = false;
+    cropRotBase = 0;
     $('cropRatioToggle').classList.remove('active');
+    $('cropRatioLbl').textContent = 'Rasio KTP';
+    $('cropFine').value = 0;
+    $('cropFineVal').textContent = '0°';
     img.onload = () => {
       cropperInstance = new Cropper(img, {
         viewMode: 1,
@@ -1872,6 +1921,8 @@
         highlight: false,
         cropBoxMovable: true,
         cropBoxResizable: true,
+        checkOrientation: true,
+        minContainerHeight: 240,
         toggleDragModeOnDblclick: false
       });
     };
@@ -1887,10 +1938,102 @@
     $('cropImgEl').src = '';
   }
 
-  function finalizeFotoKTP(dataUrl) {
-    state.fotoBase64 = dataUrl;
-    state.fotoMime = 'image/jpeg';
-    showFotoPreview(dataUrl);
+  // dataUrl = foto yang disimpan (dikecilkan), ocrUrl = versi resolusi tinggi untuk dibaca OCR
+  function finalizeFotoKTP(dataUrl, ocrUrl) {
+    downscaleDataUrl(dataUrl, 1200, small => {
+      state.fotoBase64 = small;
+      state.fotoMime = 'image/jpeg';
+      state.fotoOcr = ocrUrl || small;
+      showFotoPreview(small);
+      runKtpOcr(state.fotoOcr);
+    });
+  }
+
+  // ============================================================ //
+  // ⭐ BACA OTOMATIS NAMA & NIK (OCR server: Google Cloud Vision)  //
+  // Hasil hanya DIISIKAN ke form (tidak langsung disimpan) dan      //
+  // divalidasi struktur NIK; bila tak yakin, pengguna isi manual.   //
+  // ============================================================ //
+  function setOcrStatus(kind, html) {
+    const el = $('ocrSt');
+    if (!el) return;
+    el.className = 'ocr-st' + (kind ? ' show ' + kind : '');
+    el.innerHTML = html || '';
+  }
+
+  function setFieldAuto(id, val) {
+    const el = $(id);
+    if (!el) return;
+    el.value = val;
+    el.classList.add('auto-fill');
+    el.addEventListener('input', () => el.classList.remove('auto-fill'), { once: true });
+    if (id === 'fNik') el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function runKtpOcr(imgUrl) {
+    if (!$('ocrSt') || !imgUrl) return;
+    const token = state.ocrToken = (state.ocrToken || 0) + 1;
+    setOcrStatus('busy', '<div class="ocr-row"><span class="ocr-spin"></span><span>Membaca Nama & NIK dari KTP…</span></div>');
+    // foto buram/gelap: beri peringatan dini (tetap dicoba dibaca)
+    let tip = '';
+    try {
+      const im = new Image();
+      im.onload = () => { const q = window.KtpCapture && KtpCapture.quality(im); if (q && !q.ok) tip = q.tips[0]; };
+      im.src = imgUrl;
+    } catch (e) { /* abaikan */ }
+
+    google.script.run
+      .withSuccessHandler(r => {
+        if (token !== state.ocrToken || !$('ocrSt')) return;
+        showOcrResult(r, tip);
+      })
+      .withFailureHandler(e => {
+        if (token !== state.ocrToken || !$('ocrSt')) return;
+        setOcrStatus('err', '⚠️ Gagal membaca otomatis (' + esc(e && e.message ? e.message : 'error') + '). Isi Nama & NIK secara manual.');
+      })
+      .apiOcrKtp({ image: imgUrl });
+  }
+
+  function showOcrResult(r, tip) {
+    if (!r || !r.ok) {
+      if (r && r.code === 'OCR_DISABLED') setOcrStatus('warn', 'ℹ️ Baca otomatis belum diaktifkan di server. Isi Nama & NIK secara manual.');
+      else setOcrStatus('err', '⚠️ ' + esc((r && r.message) || 'Gagal membaca KTP') + '. Isi manual.');
+      return;
+    }
+    const d = r.data || {};
+    if (!r.hasText || (!d.nik && !d.nama)) {
+      setOcrStatus('warn', '📷 <b>Tulisan KTP tidak terbaca jelas.</b>' + (tip ? '<br>' + esc(tip) : '') +
+        '<ul><li>Foto ulang dengan cahaya cukup, tanpa silau</li><li>Pastikan seluruh KTP dalam bingkai & tajam</li></ul>Atau isi Nama & NIK secara manual.');
+      return;
+    }
+    const applied = [], offers = [];
+    const tryField = (id, label, val, trusted) => {
+      if (!val) return;
+      const cur = $(id).value.trim();
+      if (trusted && (!cur || cur === val)) { if (cur !== val) setFieldAuto(id, val); else $(id).classList.add('auto-fill'); applied.push(label); }
+      else if (cur !== val) offers.push({ id, label, val, doubt: !trusted });
+    };
+    tryField('fNik', 'NIK', d.nik, d.nikValid);
+    tryField('fNama', 'Nama', d.nama, !!d.nama);
+    let html = '';
+    const sure = applied.length && d.confidence === 'high';
+    if (applied.length) {
+      html += (sure ? '✅ <b>Terbaca otomatis:</b> ' : '⚠️ <b>Terisi otomatis (mohon cek):</b> ') + applied.join(' & ') + '. Periksa kembali sebelum menyimpan.';
+    }
+    if (offers.length) {
+      html += (html ? '<br>' : '') + offers.map(o =>
+        (o.doubt ? '🤔 Hasil baca ' + o.label + ' diragukan: ' : '🔎 Hasil baca ' + o.label + ': ') + '<b>' + esc(o.val) + '</b> ' +
+        '<button type="button" class="ocr-apply" data-ocr-id="' + o.id + '" data-ocr-val="' + esc(o.val) + '">Pakai</button>').join('<br>');
+    }
+    if (d.catatan && d.catatan.length) html += '<ul>' + d.catatan.map(c => '<li>' + esc(c) + '</li>').join('') + '</ul>';
+    if (tip && !sure) html += '<div>' + esc(tip) + '</div>';
+    const kind = sure && !offers.length ? 'ok' : 'warn';
+    setOcrStatus(kind, html);
+    const box = $('ocrSt');
+    box.querySelectorAll('.ocr-apply').forEach(b => b.addEventListener('click', () => {
+      setFieldAuto(b.getAttribute('data-ocr-id'), b.getAttribute('data-ocr-val'));
+      b.remove();
+    }));
   }
 
   function submitForm() {
@@ -3987,25 +4130,47 @@
   }
 
   // ⭐ Crop Foto KTP — wiring global (modal ada di luar appContent)
-  $('cropReset').addEventListener('click', () => { if (cropperInstance) cropperInstance.reset(); });
+  function applyCropRotation() {
+    if (!cropperInstance) return;
+    const fine = parseFloat($('cropFine').value) || 0;
+    cropperInstance.rotateTo(cropRotBase + fine);
+    $('cropFineVal').textContent = (fine > 0 ? '+' : '') + fine.toFixed(1).replace(/\.0$/, '') + '°';
+  }
+  $('cropReset').addEventListener('click', () => {
+    if (!cropperInstance) return;
+    cropRotBase = 0;
+    $('cropFine').value = 0;
+    $('cropFineVal').textContent = '0°';
+    cropperInstance.reset();
+    cropperInstance.rotateTo(0);
+  });
+  $('cropRotL').addEventListener('click', () => { cropRotBase = (cropRotBase - 90) % 360; applyCropRotation(); });
+  $('cropRotR').addEventListener('click', () => { cropRotBase = (cropRotBase + 90) % 360; applyCropRotation(); });
+  $('cropFine').addEventListener('input', applyCropRotation);
+  $('cropFineZero').addEventListener('click', () => { $('cropFine').value = 0; applyCropRotation(); });
+  $('cropZoomIn').addEventListener('click', () => { if (cropperInstance) cropperInstance.zoom(0.15); });
+  $('cropZoomOut').addEventListener('click', () => { if (cropperInstance) cropperInstance.zoom(-0.15); });
   $('cropRatioToggle').addEventListener('click', () => {
     if (!cropperInstance) return;
     cropIsFreeRatio = !cropIsFreeRatio;
     cropperInstance.setAspectRatio(cropIsFreeRatio ? NaN : KTP_RATIO);
     $('cropRatioToggle').classList.toggle('active', cropIsFreeRatio);
+    $('cropRatioLbl').textContent = cropIsFreeRatio ? 'Rasio Bebas' : 'Rasio KTP';
   });
   $('cropCancelBtn').addEventListener('click', closeCropModal);
   $('cropConfirmBtn').addEventListener('click', () => {
     if (!cropperInstance) return;
+    // resolusi tinggi (untuk OCR & disimpan dikecilkan di finalizeFotoKTP); sudut kosong akibat miring diisi putih
     const canvas = cropperInstance.getCroppedCanvas({
-      width: 1000,
+      maxWidth: 2000, maxHeight: 2000,
+      fillColor: '#ffffff',
       imageSmoothingEnabled: true,
       imageSmoothingQuality: 'high'
     });
     if (!canvas) { toast('Gagal memproses foto', 'error'); return; }
-    const finalDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+    const hi = canvas.toDataURL('image/jpeg', 0.92);
     closeCropModal();
-    finalizeFotoKTP(finalDataUrl);
+    finalizeFotoKTP(hi, hi);
   });
 
   // ============================================================ //

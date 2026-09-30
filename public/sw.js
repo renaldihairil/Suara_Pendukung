@@ -5,13 +5,14 @@
  *  - Navigasi (HTML)     : network-first → fallback cache → offline.html
  *  - /api/*              : network-only (data selalu fresh; foto no-store)
  * ============================================================ */
-const VERSION = 'pendukung-v10';
+const VERSION = 'pendukung-v11';
 const SHELL = [
   '/',
   '/index.html',
   '/offline.html',
   '/css/style.css',
   '/js/api-shim.js',
+  '/js/ktpcam.js',
   '/js/app.js',
   '/js/pages.js',
   '/js/pwa.js',

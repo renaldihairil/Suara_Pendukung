@@ -188,6 +188,14 @@ function serveStatic(res, urlPath) {
   });
 }
 
+/* ---------- Mock OCR (tanpa Google Vision) ---------- */
+(function () {
+  const ocr = require('../lib/ocr');
+  const SAMPLE = process.env.MOCK_OCR_TEXT ||
+    'PROVINSI NUSA TENGGARA BARAT\nKABUPATEN LOMBOK BARAT\nNIK : 5201012503900001\nNama : MUHAIMIN SAPUTRA\nTempat/Tgl Lahir : MATARAM, 25-03-1990\nJenis Kelamin : LAKI-LAKI Gol. Darah : O\nAlamat : DS SERUNI';
+  ocr.recognize = async function () { await new Promise(r => setTimeout(r, 300)); return { text: global.__MOCK_OCR_TEXT || SAMPLE }; };
+})();
+
 /* ---------- Server ---------- */
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
