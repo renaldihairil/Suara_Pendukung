@@ -27,7 +27,7 @@ const PGW_KEY = 'GANTI_DENGAN_KUNCI_ACAK_MIN_24_KARAKTER';
  */
 // Catatan: fungsi berakhiran "_" bersifat privat dan TIDAK tampil di dropdown; karena itu nama ini tanpa garis bawah.
 // Nomor versi skrip ini — tampil di /api/health (foto.versi) agar jelas versi mana yang sedang ter-deploy.
-const PGW_VERSION = 4;
+const PGW_VERSION = 5;
 
 /**
  * DIAGNOSIS: jalankan dari editor (pilih pgwDiag → Jalankan → buka "Log eksekusi").
@@ -45,8 +45,8 @@ function pgwDiag() {
     id = f.id;
     Logger.log('1) buat Google Doc: OK');
     try {
-      const ex = Drive.Files.export(id, 'text/plain');
-      Logger.log('2) export Drive: OK (tipe=' + typeof ex + ', panjang=' + (ex && ex.length !== undefined ? ex.length : '?') + ')');
+      const ex = pgw_export_(id);
+      Logger.log('2) export Drive: OK (panjang=' + ex.length + ')');
     } catch (e) { Logger.log('2) export Drive: GAGAL — ' + e.message); }
     try { DocumentApp.openById(id).getBody().getText(); Logger.log('3) DocumentApp: OK'); }
     catch (e) { Logger.log('3) DocumentApp: GAGAL — ' + e.message); }
@@ -66,6 +66,26 @@ function pgwAuthorize() {
 }
 
 /**
+ * Ekspor Google Doc ke teks lewat Drive API v3. Layanan lanjutan Apps Script mewajibkan opsi {alt:'media'}
+ * ("Export requires alt=media to download the exported content"); coba itu dulu, lalu tanpa opsi.
+ * Hasil bisa berupa string atau Blob → selalu dikembalikan sebagai string.
+ */
+function pgw_export_(docId) {
+  let lastErr = null;
+  const tries = [function () { return Drive.Files.export(docId, 'text/plain', { alt: 'media' }); },
+                 function () { return Drive.Files.export(docId, 'text/plain'); }];
+  for (let i = 0; i < tries.length; i++) {
+    try {
+      const ex = tries[i]();
+      if (typeof ex === 'string') return ex;
+      if (ex && ex.getDataAsString) return ex.getDataAsString();
+      return ex ? String(ex) : '';
+    } catch (err) { lastErr = err; }
+  }
+  throw lastErr;
+}
+
+/**
  * Ambil teks dari Google Doc hasil OCR. Utama: ekspor lewat Drive API (memakai izin Drive yang sudah ada,
  * TANPA izin Dokumen). Cadangan: DocumentApp (butuh izin Dokumen).
  */
@@ -73,8 +93,7 @@ function pgw_docText_(docId) {
   let why = '';
   try {
     if (typeof Drive !== 'undefined' && Drive.Files && Drive.Files.export) {      // Drive API v3
-      const ex = Drive.Files.export(docId, 'text/plain');
-      const t = (typeof ex === 'string') ? ex : (ex && ex.getDataAsString ? ex.getDataAsString() : (ex ? String(ex) : ''));
+      const t = pgw_export_(docId);
       if (t && t.trim()) return t;
       why = 'export Drive kosong (tidak ada teks terbaca)';
     } else {
