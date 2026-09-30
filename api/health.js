@@ -32,8 +32,8 @@ module.exports = async (req, res) => {
       foto.ok = cap.drive !== false;
       const kurang = [];
       if (cap.drive === false) kurang.push('izin Drive');
-      if (cap.dokumen === false) kurang.push('izin Dokumen (OCR)');
-      if (cap.driveApi === false) kurang.push('layanan Drive API (OCR)');
+      if (cap.dokumen === false && cap.driveApi === false) kurang.push('izin Dokumen atau layanan Drive API (untuk OCR)');
+      else if (cap.driveApi === false) kurang.push('layanan Drive API (OCR)');
       if (cap.email === false) kurang.push('izin email (opsional)');
       if (kurang.length) foto.catatan = 'Belum lengkap: ' + kurang.join(', ') + ' — lihat README "Izin Apps Script"';
     } catch (e) {
