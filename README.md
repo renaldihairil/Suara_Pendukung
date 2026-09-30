@@ -115,7 +115,7 @@ Bila project Apps Script lama (yang terikat ke spreadsheet yang sama) masih ada,
    ```
    Bila belum ada, tambahkan fungsi di atas tanpa baris `handleRequest`.
 2. **File + → Skrip**, namai `PhotoGateway`, tempel seluruh isi [`apps-script/PhotoGateway.gs`](apps-script/PhotoGateway.gs).
-3. **Beri izin sekali:** di editor pilih fungsi `pgw_authorize_` pada dropdown fungsi → **Jalankan** → **Tinjau izin** → pilih akun → *Advanced → Go to … (unsafe)* → **Izinkan**. (Tanpa ini, `/api/health` menampilkan *You do not have permission to call …*.)
+3. **Beri izin sekali:** di editor pilih fungsi `pgwAuthorize` pada dropdown fungsi → **Jalankan** → **Tinjau izin** → pilih akun → *Advanced → Go to … (unsafe)* → **Izinkan**. (Tanpa ini, `/api/health` menampilkan *You do not have permission to call …*.)
 4. Ganti `PGW_KEY` dengan teks acak ≥ 24 karakter (simpan untuk langkah 6). **Simpan** (Ctrl+S).
 5. **Terapkan → Kelola deployment** → ikon pensil pada deployment Web App → **Versi: Versi baru** → **Terapkan**. Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: Siapa saja*. Salin **URL Web App** (berakhiran `/exec`). Bila Google meminta izin baru, izinkan.
 6. Vercel → Settings → Environment Variables:
