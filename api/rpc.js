@@ -85,15 +85,13 @@ module.exports = async (req, res) => {
       case 'list':
       case 'getList':       r = await store.getList(params); break;
       case 'bootstrap':
-      case 'getBootstrap':  r = await store.getBootstrap({ withLogs: session.role === 'admin' }); break;
+      case 'getBootstrap':  r = await store.getBootstrap({ withLogs: session.role === 'admin', fresh: !!params.fresh }); break;
       case 'dashboard':
       case 'getDashboard':  r = await store.getDashboard(); break;
       case 'version':
       case 'getVersion': {
-        const rows = await sheets.readSheet(sheets.SHEET_PENDUKUNG);
-        let total = 0;
-        for (let i = 1; i < rows.length; i++) if (String(rows[i][0] || '').trim()) total++;
-        r = { ok: true, total, version: await store.getVersion() };
+        const version = await store.getVersion();
+        r = { ok: true, total: Number(String(version).split('|')[0]) || 0, version };
         break;
       }
       case 'checkNik':      r = await store.checkNik(params); break;
