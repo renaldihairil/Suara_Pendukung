@@ -107,7 +107,7 @@ module.exports = async (req, res) => {
         try {
           const o = await ocr.recognize(b64);
           const parsed = ktp.parseKtpText(o.text);
-          r = { ok: true, hasText: !!String(o.text).trim(), data: parsed };
+          r = { ok: true, hasText: !!String(o.text).trim(), provider: o.provider || '', data: parsed };
         } catch (e) {
           const det = String((e && (e.detail || e.message)) || '').slice(0, 240);
           const MSG = {
