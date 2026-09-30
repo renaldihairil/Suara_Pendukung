@@ -118,7 +118,19 @@ Lalu: **Simpan** → jalankan **`pgwAuthorize`** (dialog izin kini memuat keempa
 
 ## 6. Fitur
 
-- **User & role**: Admin → *Kelola User* (tambah, ubah, aktif/nonaktif, reset password). Role *User* hanya membaca; aksi tulis ditolak di server. Minimal 1 admin aktif selalu dijaga.
+- **Hak akses (3 peran)** — diatur Super Admin di *Kelola User*; kolom `Role` sheet Users berisi `admin` / `operator` / `user`:
+
+  | Kemampuan | Super Admin (`admin`) | Operator (`operator`) | User (`user`) |
+  |---|:-:|:-:|:-:|
+  | Lihat dashboard & data (termasuk foto KTP) | ✓ | ✓ | ✓ |
+  | Input data (kamera KTP, baca otomatis) | ✓ | ✓ | – |
+  | Ubah status suara (PASTI/BELUM) & status cetak (satuan/massal) | ✓ | ✓ | – |
+  | Download KTP (satuan/massal) & PDF per kampung | ✓ | ✓ | – |
+  | Edit & hapus data | ✓ | – | – |
+  | Pengaturan, Hari H, Kelola User, Log Aktivitas | ✓ | – | – |
+
+  Semua izin dicek di **server** (`lib/roles.js`), bukan hanya disembunyikan di tampilan. Peran dibaca ulang dari sheet Users di setiap aksi, jadi perubahan peran/nonaktif berlaku ±10 dtk kemudian tanpa login ulang. Minimal 1 Super Admin aktif selalu dijaga.
+- **Log Aktivitas menyebut pelaku**: sheet Log kini punya kolom `Nama` & `Peran` (mis. *Sari · Operator*), keterangan menyebut nama pendukung yang diubah, dan download KTP/PDF ikut tercatat (`DOWNLOAD_KTP`, `DOWNLOAD_KTP_MASSAL`, `DOWNLOAD_PDF`). Baris log lama tetap tampil dengan nama diambil dari sheet Users.
 - **PWA**: Android (Chrome) → tombol *Install App*; iPhone (Safari) → Share → *Add to Home Screen*; desktop → ikon install di address bar. Tampilan dasar tersedia offline, data/foto butuh internet.
 - **Hari H Pemilihan**: Admin atur di *Atur → Hari H Pemilihan* (tanggal, jam, lokasi, zona WITA) → banner hitung mundur di Dashboard.
 - **Foto KTP**: *Kamera* dengan bingkai rasio KTP (hanya isi bingkai yang tersimpan; indikator gelap/silau/buram, senter, zoom) atau *Galeri*; editor putar 90°, miringkan −45°…+45°, zoom, crop rasio KTP/bebas.

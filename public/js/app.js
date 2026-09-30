@@ -73,14 +73,17 @@
   // ============================================================ //
   // ROLE & MENU                                                   //
   // ============================================================ //
-  function isAdmin() { return !!(state.user && state.user.role === 'admin'); }
+  // Peran: admin = Super Admin (penuh) • operator = input, status suara/cetak, download • user = lihat saja
+  const ROLE_LABEL = { admin: 'Super Admin', operator: 'Operator', user: 'User' };
+  function userRole() { const r = state.user && state.user.role; return r === 'admin' || r === 'operator' ? r : 'user'; }
+  function isAdmin() { return userRole() === 'admin'; }                 // Super Admin
+  function canOperate() { return userRole() !== 'user'; }               // Super Admin atau Operator
 
   function applyRoleUI() {
     const admin = isAdmin();
-    // Sembunyikan nav khusus admin untuk role user
-    document.querySelectorAll('[data-nav="input"], [data-nav="pengaturan"]').forEach(el => {
-      el.style.display = admin ? '' : 'none';
-    });
+    const staff = canOperate();
+    document.querySelectorAll('[data-nav="input"]').forEach(el => { el.style.display = staff ? '' : 'none'; });
+    document.querySelectorAll('[data-nav="pengaturan"]').forEach(el => { el.style.display = admin ? '' : 'none'; });
     // Nav admin: Kelola User & Log Aktivitas (+ judul grup-nya)
     document.querySelectorAll('[data-nav="users"], [data-nav="logs"], .admin-only').forEach(el => {
       el.style.display = admin ? '' : 'none';
@@ -92,10 +95,33 @@
     const u = state.user || {};
     const nama = u.nama || u.username || 'Pengguna';
     document.querySelectorAll('.js-user-name').forEach(el => { el.textContent = nama; });
-    document.querySelectorAll('.js-user-role').forEach(el => { el.textContent = admin ? 'Admin' : 'User'; });
+    document.querySelectorAll('.js-user-role').forEach(el => { el.textContent = ROLE_LABEL[userRole()]; });
     document.querySelectorAll('.js-user-initials').forEach(el => { el.textContent = initialsOf(nama); });
     document.body.classList.toggle('role-admin', admin);
-    document.body.classList.toggle('role-user', !admin);
+    document.body.classList.toggle('role-operator', userRole() === 'operator');
+    document.body.classList.toggle('role-user', !staff);
+  }
+
+  // Peran diubah Super Admin saat user ini sedang membuka aplikasi → terapkan tanpa login ulang
+  function applyMe(me) {
+    if (!me || !state.user || !me.role) return false;
+    const changed = me.role !== state.user.role;
+    state.user = Object.assign({}, state.user, me);
+    if (!changed) { applyRoleUI(); return false; }
+    applyRoleUI();
+    const locked = (state.page === 'input' && !canOperate()) ||
+      (['pengaturan', 'users', 'logs'].indexOf(state.page) !== -1 && !isAdmin());
+    if (locked) { state.page = 'dashboard'; state.pageToken++; document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.getAttribute('data-nav') === 'dashboard')); }
+    toast('🔑 Hak akses Anda diubah menjadi ' + ROLE_LABEL[userRole()], 'info');
+    return true;
+  }
+
+  // Catat download (dibuat di perangkat) ke Log Aktivitas — tidak menghambat download
+  function logDownload(jenis, keterangan) {
+    try {
+      google.script.run.withSuccessHandler(() => {}).withFailureHandler(() => {})
+        .apiLogDownload({ jenis, keterangan: String(keterangan || '').slice(0, 300) });
+    } catch (e) { /* abaikan */ }
   }
 
   function startAppAfterLogin() {
@@ -126,6 +152,7 @@
   }
 
   function applyBootstrap(r) {
+    if (r.me && applyMe(r.me)) setTimeout(renderCurrentPage, 0);
     if (r.config) {
       applyConfig(r.config);
       try { sessionStorage.setItem('pendukung_config', JSON.stringify(r.config)); } catch (e) {}
@@ -749,7 +776,10 @@
       USER_RESET_PASS:['Password user direset', 'shield', 'amber'],
       GANTI_PASSWORD: ['Password diganti', 'shield', 'slate'],
       HARI_H:         ['Jadwal Hari H pemilihan diperbarui', 'calendar', 'blue'],
-      AKSES_DITOLAK:  ['Akses ditolak', 'warn', 'red']
+      AKSES_DITOLAK:  ['Akses ditolak', 'warn', 'red'],
+      DOWNLOAD_KTP:   ['KTP di-download (PDF A4)', 'download', 'blue'],
+      DOWNLOAD_KTP_MASSAL: ['KTP massal di-download', 'download', 'blue'],
+      DOWNLOAD_PDF:   ['PDF data kampung di-download', 'download', 'blue']
     };
     if (M[a]) return { text: M[a][0], ico: M[a][1], tone: M[a][2] };
     if (/LOGIN/.test(a)) return { text: /GAGAL/.test(a) ? 'Percobaan login gagal' : 'Login berhasil', ico: 'shield', tone: /GAGAL/.test(a) ? 'red' : 'slate' };
@@ -763,10 +793,11 @@
     if (!logs.length) return '<div class="act-empty">Belum ada aktivitas tercatat.</div>';
     return logs.slice(0, 5).map(l => {
       const m = logMeta(l.aksi);
-      const who = l.username ? 'oleh ' + esc(l.username) : '';
+      const who = (l.nama || l.username) ? 'oleh ' + esc(l.nama || l.username) + (l.peran ? ' (' + esc(l.peran) + ')' : '') : '';
       return '<div class="act-item">' +
         '<div class="act-ico tone-' + m.tone + '">' + (ICONS[m.ico] || ICONS.info) + '</div>' +
         '<div class="act-txt"><div class="act-title">' + esc(m.text) + '</div>' +
+        (l.keterangan && !/LOGIN|LOGOUT/.test(l.aksi) ? '<div class="act-det">' + esc(String(l.keterangan).slice(0, 90)) + '</div>' : '') +
         '<div class="act-meta">' + who + (who ? ' • ' : '') + esc(timeAgo(l.timestamp)) + '</div></div>' +
       '</div>';
     }).join('');
@@ -1175,7 +1206,7 @@
       '</div>' +
 
       '<div class="detail-actions">' +
-        (!isAdmin() ? '' :
+        (!canOperate() ? '' :
         '<button class="btn-download" id="btnDownloadPdf" ' + (filtered.length === 0 ? 'disabled' : '') + ' type="button">' +
           ICONS.download + ' Download PDF (A4)' +
         '</button>') +
@@ -1357,6 +1388,8 @@
       const namaFile = 'Data_KTP_' + slugify(kampung) + rtSuffix + statusSuffix + sortSuffix + '_' + formatTanggalFile(new Date()) + '.pdf';
       doc.save(namaFile);
       toast('✅ PDF berhasil di-download', 'success');
+      logDownload('PDF_KAMPUNG', 'PDF A4 ' + kampung + ' — ' + (rtFilter ? (rtFilter === RT_UMUM ? 'UMUM' : 'RT ' + normRT(rtFilter)) : 'semua RT') +
+        ' — ' + (verifFilter === 'true' ? 'PASTI' : verifFilter === 'false' ? 'BELUM PASTI' : 'semua status') + ' (' + dataList.length + ' data)');
     } catch (e) {
       console.error('PDF Error:', e);
       toast('Gagal buat PDF: ' + e.message, 'error');
@@ -1476,6 +1509,7 @@
         drawKtpA4Page(doc, imgToJpeg(img, 1200), p);
         doc.save('KTP_' + slugify(p.nama) + '_' + (p.nik || '') + '.pdf');
         toast('✅ PDF KTP siap di-print (A4)', 'success');
+        logDownload('KTP', 'KTP ' + p.nama + ' / NIK ' + (p.nik || '-') + ' (' + (p.kampung || '-') + ' RT ' + (p.rt || '-') + ')');
       })
       .catch(err => {
         console.error('KTP PDF error:', err);
@@ -1666,6 +1700,10 @@
         parts.push(wantPrinted ? 'SudahDicetak' : 'BelumDicetak');
         parts.push(okList.length + 'data');
         doc.save(parts.join('_') + '_' + formatTanggalFile(new Date()) + '.pdf');
+        logDownload('KTP_MASSAL', okList.length + ' KTP (' + (wantPrinted ? 'sudah' : 'belum') + ' dicetak)' +
+          (state.filter.kampung ? ' — ' + state.filter.kampung : ' — semua kampung') +
+          (state.filter.rt ? ' ' + (state.filter.rt === RT_UMUM ? 'UMUM' : 'RT ' + normRT(state.filter.rt)) : '') +
+          (failed.length ? ' • ' + failed.length + ' gagal' : ''));
 
         if (failed.length) {
           toast('✅ ' + okList.length + ' KTP ter-download • ' + failed.length + ' gagal: ' +
@@ -1720,6 +1758,7 @@
   function renderInput() {
     const c = $('appContent');
     if (!c) return;
+    if (!canOperate()) { c.innerHTML = emptyState('🔒', 'Tidak ada akses', 'Akun Anda hanya bisa melihat data.'); return; }
     state.fotoBase64 = null;
     state.fotoMime = null;
     state.nikLastChecked = '';
@@ -2336,7 +2375,7 @@
       '<div class="mini-stat"><div class="sc-ico ico-' + tone + '">' + ico + '</div>' +
       '<div class="ms-body"><div class="ms-label">' + label + '</div><div class="ms-value">' + fmtNum(val) + '</div><div class="ms-sub">' + sub + '</div></div></div>';
 
-    const headActions = !isAdmin() ? '' :
+    const headActions = !canOperate() ? '' :
       '<button class="btn-tool btn-sel-mode' + (state.sel.on ? ' active' : '') + '" id="btnSelMode" type="button">' +
         (state.sel.on ? ICONS.close + ' Keluar Ceklist' : ICONS.check + ' Ceklist Cetak') +
       '</button>' +
@@ -2396,7 +2435,7 @@
       renderData();
     });
 
-    if (isAdmin()) {
+    if (canOperate()) {
       $('btnAddFromData').addEventListener('click', () => setPage('input'));
       $('btnBulkKtp').addEventListener('click', () => {
         if (!state.allData) { toast('Data masih dimuat, tunggu sebentar', 'warn'); return; }
@@ -2509,7 +2548,7 @@
       '<div class="prow-head" aria-hidden="true">' +
         '<span class="pc-no">No</span><span class="pc-name">Nama Lengkap</span><span class="pc-nik">NIK</span>' +
         '<span class="pc-kampung">Kampung</span><span class="pc-rt">RT</span><span class="pc-jk">Jenis Kelamin</span>' +
-        '<span class="pc-status">Status</span>' + (isAdmin() ? '<span class="pc-act">Aksi</span>' : '<span class="pc-act">Detail</span>') +
+        '<span class="pc-status">Status</span>' + (canOperate() ? '<span class="pc-act">Aksi</span>' : '<span class="pc-act">Detail</span>') +
       '</div>' +
       '<div class="prow-list' + (selOn ? ' select-mode' : '') + '">';
     pageItems.forEach((p, i) => {
@@ -2525,12 +2564,14 @@
       const rowClass = 'prow ' + (isVerified ? 'verified-card' : 'unverified-card') + (isNew ? ' is-new' : '') + (isSel ? ' selected' : '');
       const id = esc(p.id);
 
-      const actions = isAdmin() ?
+      const actions = canOperate() ?
         '<button class="ra ra-verify' + (isVerified ? ' on' : '') + '" data-action="' + (isVerified ? 'unverify' : 'verify') + '" data-id="' + id + '" title="' + (isVerified ? 'Batalkan verifikasi' : 'Verifikasi (tandai sudah TTD)') + '" type="button">' + (isVerified ? ICONS.clock : ICONS.shield) + '</button>' +
         '<button class="ra ra-print' + (isPrinted ? ' on' : '') + '" data-action="toggle-print" data-id="' + id + '" title="' + (isPrinted ? 'Tandai belum dicetak' : 'Tandai sudah dicetak') + '" type="button">' + ICONS.printer + '</button>' +
         '<button class="ra ra-ktp" data-action="download-ktp" data-id="' + id + '" type="button"' + (hasFotoKTP ? ' title="Unduh KTP (A4)"' : ' disabled title="Belum ada foto KTP"') + '>' + ICONS.download + '</button>' +
+        (isAdmin() ?
         '<button class="ra ra-edit" data-action="edit" data-id="' + id + '" title="Edit data" type="button">' + ICONS.edit + '</button>' +
         '<button class="ra ra-del" data-action="del" data-id="' + id + '" data-nama="' + esc(p.nama) + '" title="Hapus data" type="button">' + ICONS.trash + '</button>'
+        : '<button class="ra ra-view" data-action="detail" data-id="' + id + '" title="Lihat detail" type="button">' + ICONS.eye + '</button>')
         :
         '<button class="ra ra-view" data-action="detail" data-id="' + id + '" title="Lihat detail" type="button">' + ICONS.eye + '</button>';
 
@@ -2664,12 +2705,12 @@
         const action = btn.getAttribute('data-action');
         const id = btn.getAttribute('data-id');
         if (action === 'detail') { window.__openDetailWarga(id); return; }
-        if (!isAdmin()) return; // role user: tombol tulis tidak ada & ditolak
-        if (action === 'edit') window.__editData(id);
-        else if (action === 'del') window.__deleteData(id, btn.getAttribute('data-nama'));
+        if (!canOperate()) return; // role user: tombol tulis tidak ada & ditolak server
+        if (action === 'edit') { if (isAdmin()) window.__editData(id); }
+        else if (action === 'del') { if (isAdmin()) window.__deleteData(id, btn.getAttribute('data-nama')); }
         else if (action === 'verify') window.__startVerify(id);
         else if (action === 'unverify') window.__unverifyData(id);
-        else if (action === 'download-ktp' && isAdmin()) window.__downloadKtpA4(id, btn);
+        else if (action === 'download-ktp') window.__downloadKtpA4(id, btn);
         else if (action === 'toggle-print') window.__togglePrint(id, btn);
         return;
       }
@@ -2916,15 +2957,15 @@
         ) +
       '</div>' +
 
-      (!isAdmin() ? '' : '<div class="warga-actions">' +
+      (!canOperate() ? '' : '<div class="warga-actions">' +
         (isVerified
           ? '<button class="btn btn-outline wa-main" id="btnDetailUnverify" type="button">' + ICONS.clock + ' Batal Verifikasi</button>'
           : '<button class="btn btn-primary wa-main" id="btnDetailVerify" type="button">' + ICONS.shield + ' Verifikasi Sekarang</button>'
         ) +
-        '<button class="btn wa-btn wa-edit" id="btnDetailEdit" type="button">' + ICONS.edit + ' Edit Data</button>' +
+        (isAdmin() ? '<button class="btn wa-btn wa-edit" id="btnDetailEdit" type="button">' + ICONS.edit + ' Edit Data</button>' : '') +
         '<button class="btn wa-btn wa-print" id="btnDetailPrint" type="button">' + ICONS.printer + (isPrinted ? ' Tandai Belum Cetak' : ' Tandai Sudah Cetak') + '</button>' +
         '<button class="btn wa-btn wa-ktp" id="btnDetailKtp" type="button"' + (p.fotoKTPId ? '' : ' disabled') + '>' + ICONS.download + ' Unduh KTP</button>' +
-        '<button class="btn wa-btn wa-del" id="btnDetailDel" type="button">' + ICONS.trash + ' Hapus Data</button>' +
+        (isAdmin() ? '<button class="btn wa-btn wa-del" id="btnDetailDel" type="button">' + ICONS.trash + ' Hapus Data</button>' : '') +
       '</div>');
 
     const btnClose = $('btnCloseDetailWarga');
@@ -3253,12 +3294,14 @@
   };
 
   window.__editData = function(id) {
+    if (!isAdmin()) { toast('Edit data khusus Super Admin', 'warn'); return; }
     const p = (state.allData || []).find(x => String(x.id) === String(id));
     if (!p) { toast('Data tidak ditemukan', 'error'); return; }
     openEditModal(p);
   };
 
   window.__deleteData = function(id, nama) {
+    if (!isAdmin()) { toast('Hapus data khusus Super Admin', 'warn'); return; }
     $('confirmTitle').textContent = 'Hapus Data?';
     $('confirmMsg').innerHTML = 'Data <b>' + esc(nama) + '</b> akan dihapus permanen. Lanjutkan?';
     $('confirmYes').textContent = 'Ya, Hapus';
@@ -3748,6 +3791,7 @@
   function renderPengaturan() {
     const c = $('appContent');
     if (!c) return;
+    if (!isAdmin()) { c.innerHTML = emptyState('🔒', 'Khusus Super Admin', 'Pengaturan hanya bisa diubah oleh Super Admin.'); return; }
     const token = state.pageToken;
 
     if (state.cfgCache && state.dashboardCache) {
@@ -4342,6 +4386,6 @@
   // ============================================================ //
   // EKSPOR UNTUK pages.js (halaman admin & profil)                //
   // ============================================================ //
-  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, setPage, reloadData: cb => fetchAndReplace(true, cb), state: state };
+  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, canOperate, userRole, ROLE_LABEL, setPage, reloadData: cb => fetchAndReplace(true, cb), state: state };
 
 })();

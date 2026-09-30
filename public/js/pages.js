@@ -14,6 +14,16 @@
   const state = A.state || {}; // state bersama dari app.js
   window.state = state;       // dipakai fungsi global lama (renderUsers dll)
 
+  const ROLE_LABEL = A.ROLE_LABEL || { admin: 'Super Admin', operator: 'Operator', user: 'User' };
+  const ROLE_TAG = { admin: 'verified', operator: 'unprinted role-op', user: 'unverified' };
+  const ROLE_ICO = { admin: '👑', operator: '🛠️', user: '👁️' };
+  const ROLE_DESC = {
+    admin: 'Mengelola sepenuhnya: input, edit & hapus data, status suara & cetak, download, Pengaturan, Kelola User, dan Log Aktivitas.',
+    operator: 'Input data (kamera KTP & baca otomatis), ubah status suara (PASTI/BELUM) & status cetak, download KTP & PDF per kampung. Tidak bisa edit/hapus data, Pengaturan, maupun Kelola User. Semua aksinya tercatat di Log atas namanya.',
+    user: 'Hanya melihat dashboard & data (termasuk foto KTP). Tidak bisa mengubah apa pun.'
+  };
+  const roleOf = r => (r === 'admin' || r === 'operator' ? r : 'user');
+
   /* ============================================================ */
   /* KELOLA USER (admin)                                           */
   /* ============================================================ */
@@ -36,15 +46,16 @@
     const users = state.usersCache;
     let rows = '';
     users.forEach(u => {
-      const roleCls = u.role === 'admin' ? 'verified' : 'unverified';
-      const roleLbl = u.role === 'admin' ? 'ADMIN' : 'USER';
+      const rl = roleOf(u.role);
+      const roleCls = ROLE_TAG[rl];
+      const roleLbl = ROLE_ICO[rl] + ' ' + ROLE_LABEL[rl].toUpperCase();
       const aktif = u.aktif !== false && u.aktif !== 'false';
       rows +=
         '<div class="cfg-kampung-card user-card' + (aktif ? '' : ' user-off') + '">' +
           '<div class="cfg-kk-head">' +
             '<div class="cfg-kk-avatar">' + esc((u.nama || u.username || '?').slice(0, 2).toUpperCase()) + '</div>' +
             '<div class="cfg-kk-info">' +
-              '<div class="cfg-kk-name">' + esc(u.nama || u.username) + ' <span class="person-verify-tag ' + roleCls + '" style="margin-left:6px">' + (ICONS.shield || '') + ' ' + roleLbl + '</span></div>' +
+              '<div class="cfg-kk-name">' + esc(u.nama || u.username) +  ' <span class="person-verify-tag ' + roleCls + '" style="margin-left:6px">' + roleLbl + '</span></div>' +
               '<div class="cfg-kk-sub">@' + esc(u.username) + ' • Login terakhir: ' + esc(u.lastLogin ? String(u.lastLogin).replace('T', ' ').slice(0, 16) : 'belum pernah') + '</div>' +
             '</div>' +
             '<div class="cfg-kk-actions">' +
@@ -62,11 +73,13 @@
         '<div class="cfg-hero-content">' +
           '<div class="cfg-hero-label">' + (ICONS.users || '') + ' ADMIN PANEL</div>' +
           '<div class="cfg-hero-title">Kelola User</div>' +
-          '<div class="cfg-hero-cand">Tambah user, atur role, aktif/nonaktif, reset password</div>' +
+          '<div class="cfg-hero-cand">Tambah user, atur hak akses (Super Admin / Operator / User), aktif/nonaktif, reset password</div>' +
         '</div>' +
         '<div class="cfg-hero-stats">' +
           '<div class="cfg-hero-stat"><div class="lbl">Total User</div><div class="val">' + users.length + '</div></div>' +
-          '<div class="cfg-hero-stat"><div class="lbl">Admin</div><div class="val">' + users.filter(u => u.role === 'admin').length + '</div></div>' +
+          '<div class="cfg-hero-stat"><div class="lbl">Super Admin</div><div class="val">' + users.filter(u => roleOf(u.role) === 'admin').length + '</div></div>' +
+          '<div class="cfg-hero-stat"><div class="lbl">Operator</div><div class="val">' + users.filter(u => roleOf(u.role) === 'operator').length + '</div></div>' +
+          '<div class="cfg-hero-stat"><div class="lbl">User</div><div class="val">' + users.filter(u => roleOf(u.role) === 'user').length + '</div></div>' +
           '<div class="cfg-hero-stat"><div class="lbl">Aktif</div><div class="val">' + users.filter(u => u.aktif !== false && u.aktif !== 'false').length + '</div></div>' +
         '</div>' +
       '</div>' +
@@ -77,7 +90,9 @@
           '<button class="cfg-kk-btn edit" id="btnUserAdd" title="Tambah user" type="button" style="width:auto;padding:0 12px;height:36px;border-radius:10px">' + (ICONS.plus || '+') + ' Tambah</button>' +
         '</div>' +
         '<div>' + rows + '</div>' +
-        '<div class="cfg-info">' + (ICONS.info || '') + '<div>User role <b>User</b> hanya bisa melihat dashboard & data (termasuk foto). Hanya admin yang bisa input/ubah/hapus.</div></div>' +
+        '<div class="role-guide">' + ['admin', 'operator', 'user'].map(r =>
+          '<div class="role-guide-item"><span class="person-verify-tag ' + ROLE_TAG[r] + '">' + ROLE_ICO[r] + ' ' + ROLE_LABEL[r].toUpperCase() + '</span>' +
+          '<div>' + esc(ROLE_DESC[r]) + '</div></div>').join('') + '</div>' +
       '</div>';
 
     const btnAdd = $('btnUserAdd');
@@ -102,7 +117,10 @@
     $('muUsername').value = isEdit ? u.username : '';
     $('muUsername').disabled = isEdit;
     $('muNama').value = isEdit ? (u.nama || '') : '';
-    $('muRole').value = isEdit ? u.role : 'user';
+    $('muRole').value = isEdit ? roleOf(u.role) : 'user';
+    const hint = () => { const r = roleOf($('muRole').value); $('muRoleHint').innerHTML = '<b>' + ROLE_ICO[r] + ' ' + esc(ROLE_LABEL[r]) + ':</b> ' + esc(ROLE_DESC[r]); };
+    $('muRole').onchange = hint;
+    hint();
     $('muPass').value = '';
     $('muPassGroup').style.display = isEdit ? 'none' : '';
     $('modalUser').classList.add('show');
@@ -182,6 +200,7 @@
     const cls = a => {
       if (/GAGAL|DITOLAK/.test(a)) return 'unverified';
       if (/LOGIN|LOGOUT/.test(a)) return 'unprinted';
+      if (/DOWNLOAD/.test(a)) return 'unprinted';
       return 'verified';
     };
     let rows = '';
@@ -189,7 +208,10 @@
       rows +=
         '<div class="log-row">' +
           '<div class="log-aksi"><span class="person-verify-tag ' + cls(l.aksi) + '">' + esc(l.aksi) + '</span></div>' +
-          '<div class="log-info"><b>' + esc(l.username || '-') + '</b> — ' + esc(l.keterangan || '') +
+          '<div class="log-info"><b>' + esc(l.nama || l.username || '-') + '</b>' +
+            (l.peran ? ' <span class="log-peran">' + esc(l.peran) + '</span>' : '') +
+            (l.nama && l.username && l.username !== '-' ? ' <span class="log-uname">@' + esc(l.username) + '</span>' : '') +
+            ' — ' + esc(l.keterangan || '') +
             '<div class="log-time">' + esc(String(l.timestamp).replace('T', ' ').slice(0, 19)) + '</div>' +
           '</div>' +
         '</div>';
