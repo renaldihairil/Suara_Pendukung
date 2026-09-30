@@ -101,6 +101,21 @@ Google membatasi **60 permintaan baca per menit** per proyek. Aplikasi sudah dih
 
 Tanpa variabel itu aplikasi tetap jalan: data tersimpan, hanya foto yang gagal (dengan peringatan jelas).
 
+## 5e. Foto via Jembatan Apps Script (paling stabil — tanpa token kedaluwarsa, tanpa billing)
+
+Bila project Apps Script lama (yang terikat ke spreadsheet yang sama) masih ada, foto bisa disimpan lewat **Web App Apps Script** milik Anda. Skrip berjalan atas nama akun Anda sehingga foto masuk ke Drive Anda (folder `FOTO_KTP_PENDUKUNG_2026` / `FOTO_BUKTI_TTD_2026` yang sama, foto lama tetap terbaca) dan **tidak ada token yang kedaluwarsa**.
+
+1. Di project Apps Script, tekan **Ctrl+F** cari `doPost` di semua file. Bila **sudah ada**, beri tahu saya (nama fungsinya perlu disesuaikan).
+2. **File + → Skrip**, namai `PhotoGateway`, tempel seluruh isi [`apps-script/PhotoGateway.gs`](apps-script/PhotoGateway.gs).
+3. Ganti `PGW_KEY` dengan teks acak ≥ 24 karakter (simpan untuk langkah 6). **Simpan** (Ctrl+S).
+4. **Terapkan → Kelola deployment** → ikon pensil pada deployment Web App → **Versi: Versi baru** → **Terapkan**. Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: Siapa saja*. Salin **URL Web App** (berakhiran `/exec`). Bila Google meminta izin baru, izinkan.
+5. Vercel → Settings → Environment Variables:
+   - `APPSCRIPT_PHOTO_URL` = URL Web App (type **Config**)
+   - `APPSCRIPT_PHOTO_KEY` = nilai `PGW_KEY` (type **Secret**)
+6. **Redeploy**, lalu cek `/api/health` → `"drive":{"mode":"appscript","ok":true,"akun":"email-anda"}`.
+
+Prioritas penyimpanan foto: **Jembatan Apps Script → OAuth (5d) → Service Account**. Bila `APPSCRIPT_PHOTO_*` dihapus, aplikasi kembali ke OAuth.
+
 ## 6. Alur Kerja Git → Deploy
 
 ```bash
