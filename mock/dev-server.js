@@ -218,6 +218,7 @@ function serveStatic(res, urlPath) {
         if (!f) return out({ ok: false, message: 'File tidak ditemukan' });
         return out({ ok: true, mime: f.mime, base64: f.bytes.toString('base64') });
       }
+      if (req.op === 'ocr') return out(process.env.MOCK_GW_NO_DRIVE ? { ok: false, code: 'NO_DRIVE_SERVICE', message: 'Layanan lanjutan Drive API belum ditambahkan' } : { ok: true, text: 'NIK : 5203083112950231\nNama : JUMADIL\nTempat/Tgl Lahir : X, 31-12-1995' });
       if (req.op === 'trash') { delete mockFiles[req.fileId]; return out({ ok: true }); }
       return out({ ok: false, message: 'op tidak dikenal' });
     }

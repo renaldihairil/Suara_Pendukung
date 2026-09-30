@@ -114,6 +114,13 @@ Bila project Apps Script lama (yang terikat ke spreadsheet yang sama) masih ada,
    - `APPSCRIPT_PHOTO_KEY` = nilai `PGW_KEY` (type **Secret**)
 6. **Redeploy**, lalu cek `/api/health` → `"drive":{"mode":"appscript","ok":true,"akun":"email-anda"}`.
 
+### Baca otomatis Nama & NIK GRATIS lewat jembatan yang sama (OCR bawaan Google Drive)
+Jembatan juga punya operasi `ocr` yang memakai OCR Google Drive (gratis, berjalan atas nama akun Anda, tanpa billing). Tambahan langkah sekali saja di Apps Script:
+1. Di editor Apps Script: **Layanan (+)** di sidebar kiri → pilih **Drive API** → **Tambahkan**.
+2. Deploy ulang (Terapkan → Kelola deployment → pensil → Versi baru). Google akan meminta izin tambahan (Google Dokumen & Drive) — izinkan.
+3. Selesai. Urutan OCR aplikasi: **Google Vision** (bila billing aktif) → **Apps Script/Drive OCR** → **OCR.space** (bila `OCRSPACE_API_KEY` diisi). `OCR_PROVIDER=appscript` memaksa Drive OCR.
+Akurasi Drive OCR belum tentu setinggi Google Vision pada KTP berlatar ramai; validasi NIK (kode wilayah, tanggal lahir, silang-cek) tetap menolak hasil yang tidak wajar.
+
 Prioritas penyimpanan foto: **Jembatan Apps Script → OAuth (5d) → Service Account**. Bila `APPSCRIPT_PHOTO_*` dihapus, aplikasi kembali ke OAuth.
 
 ## 6. Alur Kerja Git → Deploy

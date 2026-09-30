@@ -52,6 +52,35 @@ function doPost(e) {
         return pgw_out_({ ok: true, mime: blob.getContentType(), base64: Utilities.base64Encode(blob.getBytes()) });
       }
 
+      case 'ocr': {
+        // OCR gratis bawaan Google Drive: gambar → Google Doc (OCR) → ambil teks → hapus Doc sementara.
+        // Butuh Layanan lanjutan "Drive API" (Layanan + → Drive API → Tambahkan).
+        if (!req.base64) return pgw_out_({ ok: false, message: 'Data foto kosong' });
+        if (typeof Drive === 'undefined' || !Drive.Files) {
+          return pgw_out_({ ok: false, code: 'NO_DRIVE_SERVICE', message: 'Layanan lanjutan Drive API belum ditambahkan di Apps Script (Layanan → + → Drive API)' });
+        }
+        const blob = Utilities.newBlob(Utilities.base64Decode(req.base64), req.mime || 'image/jpeg', 'ocr_tmp.jpg');
+        const title = 'ocr_tmp_' + Date.now();
+        const convert = function (lang) {
+          if (Drive.Files.insert) {            // Drive API v2
+            const o = { ocr: true };
+            if (lang) o.ocrLanguage = lang;
+            return Drive.Files.insert({ title: title, mimeType: 'application/vnd.google-apps.document' }, blob, o);
+          }
+          const o3 = {};                        // Drive API v3
+          if (lang) o3.ocrLanguage = lang;
+          return Drive.Files.create({ name: title, mimeType: 'application/vnd.google-apps.document' }, blob, o3);
+        };
+        let doc;
+        try { doc = convert('id'); } catch (e1) { doc = convert(''); }   // bahasa Indonesia; bila ditolak → otomatis
+        try {
+          const text = DocumentApp.openById(doc.id).getBody().getText();
+          return pgw_out_({ ok: true, text: text });
+        } finally {
+          try { DriveApp.getFileById(doc.id).setTrashed(true); } catch (e2) { /* abaikan */ }
+        }
+      }
+
       default:
         return pgw_out_({ ok: false, message: 'op tidak dikenal' });
     }
