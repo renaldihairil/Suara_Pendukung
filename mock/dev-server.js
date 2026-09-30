@@ -197,6 +197,34 @@ function serveStatic(res, urlPath) {
   });
 }
 
+/* ---------- Mock jembatan foto Apps Script (Web App doPost) ---------- */
+(function () {
+  const realFetch = global.fetch;
+  const KEY = 'kunci-uji-minimal-24-karakter-x';
+  global.fetch = async function (url, opt) {
+    if (String(url).startsWith('https://script.google.com/macros/s/MOCK')) {
+      if (process.env.MOCK_GW_HTML) return { ok: true, status: 200, text: async () => '<html>Login</html>' };
+      const req = JSON.parse((opt && opt.body) || '{}');
+      const out = o => ({ ok: true, status: 200, text: async () => JSON.stringify(o) });
+      if (req.key !== KEY) return out({ ok: false, message: 'Kunci salah' });
+      if (req.op === 'ping') return out({ ok: true, user: 'pemilik@example.com' });
+      if (req.op === 'upload') {
+        const id = 'G' + (++fileSeq);
+        mockFiles[id] = { id, name: req.name, mime: req.mime, bytes: Buffer.from(req.base64, 'base64'), folder: req.folder };
+        return out({ ok: true, fileId: id });
+      }
+      if (req.op === 'get') {
+        const f = mockFiles[req.fileId];
+        if (!f) return out({ ok: false, message: 'File tidak ditemukan' });
+        return out({ ok: true, mime: f.mime, base64: f.bytes.toString('base64') });
+      }
+      if (req.op === 'trash') { delete mockFiles[req.fileId]; return out({ ok: true }); }
+      return out({ ok: false, message: 'op tidak dikenal' });
+    }
+    return realFetch.apply(this, arguments);
+  };
+})();
+
 /* ---------- Mock OCR (tanpa Google Vision) ---------- */
 (function () {
   const ocr = require('../lib/ocr');

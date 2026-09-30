@@ -12,14 +12,20 @@ module.exports = async (req, res) => {
     const rows = await sheets.readSheet(sheets.SHEET_CONFIG);
     // Cek Drive (foto): mode & apakah akun bisa dipakai
     const g = require('../lib/gauth').getGoogle();
-    let drive = { mode: g.driveMode, ok: false };
+    const gd = require('../lib/gdrive');
+    let drive = { mode: gd.gwCfg() ? 'appscript' : g.driveMode, ok: false };
     try {
+      if (gd.gwCfg()) {
+        const pong = await gd.gwCall({ op: 'ping' });
+        drive.ok = true; drive.akun = pong.user;
+      } else {
       const about = await g.drive.about.get({ fields: 'user(emailAddress),storageQuota(limit,usage)' });
       drive.ok = true;
       drive.akun = about.data && about.data.user && about.data.user.emailAddress;
       const q = about.data && about.data.storageQuota;
       if (q) { drive.limitGB = q.limit ? +(q.limit / 1e9).toFixed(1) : null; drive.usedGB = q.usage ? +(q.usage / 1e9).toFixed(2) : 0; }
       if (g.driveMode !== 'oauth' && q && q.limit !== undefined && Number(q.limit) === 0) { drive.ok = false; drive.catatan = 'Service Account tanpa kuota Drive — foto tak bisa diunggah. Isi GOOGLE_OAUTH_* (README 5d).'; }
+      }
     } catch (e) { drive.catatan = String(e && e.message || e).slice(0, 200); }
     res.statusCode = 200;
     res.end(JSON.stringify({ ok: true, spreadsheet: true, drive, configRows: Math.max(0, rows.length - 1), time: new Date().toISOString() }));
