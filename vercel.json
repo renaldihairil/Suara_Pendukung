@@ -1,6 +1,14 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
+  "regions": [
+    "sin1"
+  ],
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 60
+    }
+  },
   "headers": [
     {
       "source": "/sw.js",
@@ -45,10 +53,5 @@
         }
       ]
     }
-  ],
-  "functions": {
-    "api/*.js": {
-      "maxDuration": 60
-    }
-  }
+  ]
 }

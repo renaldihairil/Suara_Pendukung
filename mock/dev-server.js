@@ -44,12 +44,17 @@ function colToIndex(letters) {
   return n - 1;
 }
 
+// Uji kinerja: MOCK_LATENCY_MS meniru latensi Google Sheets; hitungan panggilan di global.__gcalls
+global.__gcalls = 0;
+const lat = async () => { global.__gcalls++; const ms = Number(process.env.MOCK_LATENCY_MS || 0); if (ms) await new Promise(r => setTimeout(r, ms)); };
 const sheetsApi = {
   spreadsheets: {
     async get() {
+        await lat();
       return { data: { sheets: Object.keys(mockSheets).map(t => ({ properties: { title: t, sheetId: t } })) } };
     },
     async batchUpdate(opts) {
+        await lat();
       for (const req of (opts.resource.requests || [])) {
         if (req.addSheet) mockSheets[req.addSheet.properties.title] = [];
         if (req.deleteDimension) {
@@ -61,6 +66,7 @@ const sheetsApi = {
     },
     values: {
       async get(opts) {
+        await lat();
         const m = String(opts.range).match(/^'(.+)'!(.+)$/);
         const title = m[1];
         const rows = mockSheets[title] || [];
@@ -81,6 +87,7 @@ const sheetsApi = {
         return { data: { values: rows.map(r => r.slice()) } };
       },
       async batchGet(opts) {
+        await lat();
         const valueRanges = [];
         for (const range of opts.ranges) {
           const r = await sheetsApi.spreadsheets.values.get({ range, _internal: true });
@@ -89,6 +96,7 @@ const sheetsApi = {
         return { data: { valueRanges } };
       },
       async update(opts) {
+        await lat();
         const m = String(opts.range).match(/^'(.+)'!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
         const title = m[1];
         const r1 = parseInt(m[3], 10), c1 = colToIndex(m[2]);
@@ -104,6 +112,7 @@ const sheetsApi = {
         return { data: {} };
       },
       async append(opts) {
+        await lat();
         const m = String(opts.range).match(/^'(.+)'!/);
         (mockSheets[m[1]] || (mockSheets[m[1]] = [])).push(opts.resource.values[0].slice());
         return { data: {} };
@@ -112,16 +121,14 @@ const sheetsApi = {
   }
 };
 
-const fakeGoogleapis = {
-  google: {
-    auth: { JWT: function () {} },
-    sheets: () => sheetsApi
-  }
+const fakeSheetsPkg = {
+  auth: { JWT: function () {} },
+  sheets: () => sheetsApi
 };
 
 Module._load = function (request, parent, isMain) {
-  if (request === 'googleapis' && parent && parent.filename === gauthAbs) {
-    return fakeGoogleapis;
+  if (request === '@googleapis/sheets' && parent && parent.filename === gauthAbs) {
+    return fakeSheetsPkg;
   }
   return origLoad.apply(this, arguments);
 };
@@ -201,6 +208,7 @@ process.env.APPSCRIPT_PHOTO_KEY = process.env.APPSCRIPT_PHOTO_KEY || 'kunci-uji-
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
   try {
+    if (u.pathname === '/__gcalls') { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ n: global.__gcalls })); }
     if (u.pathname === '/api/rpc') return await require('../api/rpc')(req, res);
     if (u.pathname === '/api/auth') return await require('../api/auth')(req, res);
     if (u.pathname === '/api/photo') return await require('../api/photo')(req, res);

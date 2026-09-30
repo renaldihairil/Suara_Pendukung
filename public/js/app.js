@@ -105,15 +105,58 @@
     const fab = $('fabScan');
     if (fab && isAdmin()) fab.classList.add('show');
     applyRoleUI();
+    state.page = 'dashboard';
+    state.pageToken++;
+    document.querySelectorAll('[data-nav]').forEach(el => {
+      el.classList.toggle('active', el.getAttribute('data-nav') === 'dashboard');
+    });
+    const c = $('appContent');
+    if (c) c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat data...</p></div>';
+    // SATU permintaan untuk semua data awal (config + dashboard + daftar + versi + badge duplikat)
+    google.script.run
+      .withSuccessHandler(r => {
+        if (!r || !r.ok) { legacyStart(); return; }
+        applyBootstrap(r);
+        renderCurrentPage();
+        startPolling(true);          // data baru saja dimuat → cek perubahan berikutnya sesuai interval
+        watchModals();
+      })
+      .withFailureHandler(() => legacyStart())
+      .apiGetBootstrap();
+  }
+
+  function applyBootstrap(r) {
+    if (r.config) {
+      applyConfig(r.config);
+      try { sessionStorage.setItem('pendukung_config', JSON.stringify(r.config)); } catch (e) {}
+    }
+    if (Array.isArray(r.logs)) { state.dashLogs = r.logs; state.dashLogsAt = Date.now(); }
+    if (r.dashboard) {
+      state.dashboardCache = r.dashboard;
+      state.dashboardAt = Date.now();
+      STATS_PER_KAMPUNG = r.dashboard.perKampung || {};
+      STATS_VERIFIED_PER_KAMPUNG = r.dashboard.kampungVerified || {};
+    }
+    if (Array.isArray(r.list)) {
+      state.allData = r.list;
+      state.loadedAt = Date.now();
+      state.version = r.version || '0|empty';
+      try {
+        sessionStorage.setItem('pendukung_cache_v1', JSON.stringify(r.list));
+        sessionStorage.setItem('pendukung_cache_at', String(state.loadedAt));
+        sessionStorage.setItem('pendukung_cache_version', state.version);
+      } catch (e) {}
+    }
+    state._lastDupCheck = Date.now();
+    if (isAdmin()) updateFabBadge(r.dupGroups || 0);
+    setSyncStatus('online');
+  }
+
+  // Cadangan bila bootstrap gagal (mis. server lama): alur lama per bagian
+  function legacyStart() {
     loadConfig(() => {
-      state.page = 'dashboard';
-      state.pageToken++;
-      document.querySelectorAll('[data-nav]').forEach(el => {
-        el.classList.toggle('active', el.getAttribute('data-nav') === 'dashboard');
-      });
       renderCurrentPage();
       startPolling();
-      if (isAdmin()) checkDupBadge();
       watchModals();
     });
   }
@@ -453,7 +496,16 @@
       credentials: 'same-origin',
       body: JSON.stringify({ op: 'login', username: uname, password: pw })
     })
-      .then(r => r.json())
+      .then(async res => {
+        const txt = await res.text();
+        try { return JSON.parse(txt); }
+        catch (e) {
+          // halaman error Vercel (bukan JSON) → pesan yang bisa dipahami
+          return { ok: false, message: res.status === 504 || /timeout/i.test(txt)
+            ? 'Server terlalu lama merespons. Coba lagi sebentar.'
+            : 'Server sedang bermasalah (HTTP ' + res.status + '). Coba lagi sebentar.' };
+        }
+      })
       .then(r => {
         $('loginBtn').disabled = false;
         $('loginBtn').innerHTML = '<span class="btn-text">Masuk</span>';
@@ -510,9 +562,9 @@
   // ============================================================ //
   // POLLING                                                       //
   // ============================================================ //
-  function startPolling() {
+  function startPolling(skipFirst) {
     stopPolling();
-    syncData(true);
+    if (!skipFirst) syncData(true);
     state.pollTimer = setInterval(() => {
       if (!document.hidden) syncData(true);
     }, POLL_INTERVAL);
@@ -563,7 +615,7 @@
         else if (isStillOn(token, 'detail-kampung') && $('appContent')) renderDetailKampung();
         if (silent) showPullIndicator();
         if (typeof callback === 'function') callback(true);
-        if (!state._lastDupCheck || (Date.now() - state._lastDupCheck > 60000)) checkDupBadge();
+        if (isAdmin() && (!state._lastDupCheck || (Date.now() - state._lastDupCheck > 60000))) checkDupBadge();
       })
       .withFailureHandler(e => {
         state.isFetching = false;
@@ -598,11 +650,13 @@
     if (!c) return;
     if (state.dashboardCache) {
       renderDashboardData();
+      if (Date.now() - (state.dashboardAt || 0) < 30000) return;   // baru dimuat → tak perlu minta ulang
       const token = state.pageToken;
       google.script.run
         .withSuccessHandler(r => {
           if (r.ok && isStillOn(token, 'dashboard')) {
             state.dashboardCache = r.data;
+            state.dashboardAt = Date.now();
             STATS_PER_KAMPUNG = r.data.perKampung || {};
             STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
             if (r.data.kampungList) applyConfig(r.data);

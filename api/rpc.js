@@ -84,6 +84,8 @@ module.exports = async (req, res) => {
       /* ============ READ (semua role terautentikasi) ============ */
       case 'list':
       case 'getList':       r = await store.getList(params); break;
+      case 'bootstrap':
+      case 'getBootstrap':  r = await store.getBootstrap({ withLogs: session.role === 'admin' }); break;
       case 'dashboard':
       case 'getDashboard':  r = await store.getDashboard(); break;
       case 'version':
