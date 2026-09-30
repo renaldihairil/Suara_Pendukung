@@ -211,6 +211,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (u.pathname === '/__gcalls') { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ n: global.__gcalls, gets: global.__gwgets || 0 })); }
     if (u.pathname === '/api/rpc') return await require('../api/rpc')(req, res);
+    if (u.pathname === '/api/rev') return await require('../api/rev')(req, res);
     if (u.pathname === '/api/auth') return await require('../api/auth')(req, res);
     if (u.pathname === '/api/photo') return await require('../api/photo')(req, res);
     if (u.pathname === '/api/health') return await require('../api/health')(req, res);

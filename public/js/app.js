@@ -4,7 +4,7 @@
   // ============================================================ //
   const RT_LIST = ['001','002','003','004','005','006','007','008','009','010','UMUM'];
   const RT_UMUM = 'UMUM';
-  const POLL_INTERVAL = 30000; // interval cek perubahan data (hemat kuota baca Google Sheets)
+  const POLL_INTERVAL = 4000;  // cek sinyal perubahan (/api/rev, di-cache CDN ±2 dtk → hemat kuota Google Sheets)
   const PER_PAGE = 15;
 
   let KAMPUNG_LIST = ['Sasak', 'Mandar', 'Barantapen Asri', 'Dames'];
@@ -141,6 +141,7 @@
       state.allData = r.list;
       state.loadedAt = Date.now();
       state.version = r.version || '0|empty';
+      if (r.rev) state.rev = r.rev;
       try {
         sessionStorage.setItem('pendukung_cache_v1', JSON.stringify(r.list));
         sessionStorage.setItem('pendukung_cache_at', String(state.loadedAt));
@@ -566,11 +567,17 @@
   // ============================================================ //
   // POLLING                                                       //
   // ============================================================ //
+  // ============================================================ //
+  // REALTIME: semua perangkat melihat perubahan dalam ±5 detik     //
+  // 1) cek sinyal /api/rev tiap 4 dtk (sangat ringan, cache CDN)   //
+  // 2) bila berubah → ambil data terbaru dalam SATU permintaan     //
+  // 3) perbarui halaman yang sedang dilihat tanpa refresh          //
+  // ============================================================ //
   function startPolling(skipFirst) {
     stopPolling();
     if (!skipFirst) syncData(true);
     state.pollTimer = setInterval(() => {
-      if (!document.hidden) syncData(true);
+      if (!document.hidden && navigator.onLine !== false) syncData(true);
     }, POLL_INTERVAL);
   }
 
@@ -579,54 +586,66 @@
   }
 
   function syncData(silent) {
-    if (state.isFetching) return;
-    state.isFetching = true;
+    if (state.isFetching || state.isRevChecking) return;
+    state.isRevChecking = true;
     if (!silent) setSyncStatus('syncing');
-    google.script.run
-      .withSuccessHandler(r => {
-        if (!r.ok) { state.isFetching = false; if (!silent) setSyncStatus('offline'); return; }
-        const newVersion = r.version || '0|empty';
-        if (newVersion === state.version && state.allData) {
-          state.isFetching = false;
-          setSyncStatus('online');
-          return;
-        }
-        fetchAndReplace(silent);
+    fetch('/api/rev', { credentials: 'same-origin', cache: 'no-cache' })
+      .then(r => r.ok ? r.json() : null)
+      .then(r => {
+        state.isRevChecking = false;
+        if (!r || !r.ok) { if (!silent) setSyncStatus('offline'); return; }
+        setSyncStatus('online');
+        if (state.rev && r.rev === state.rev && state.allData) return;       // tidak ada perubahan
+        state.isFetching = true;
+        fetchAndReplace(true, null, { fromRemote: !!state.rev });
       })
-      .withFailureHandler(e => { state.isFetching = false; if (!/sibuk/i.test((e && e.message) || '')) setSyncStatus('offline'); })
-      .apiGetVersion();
+      .catch(() => { state.isRevChecking = false; if (!silent) setSyncStatus('offline'); });
   }
 
-  function fetchAndReplace(silent, callback) {
+  // Ambil data terbaru (satu permintaan) lalu perbarui tampilan yang sedang dibuka
+  function fetchAndReplace(silent, callback, opts) {
     const token = state.pageToken;
+    const prevRev = state.rev;
     google.script.run
       .withSuccessHandler(r => {
         state.isFetching = false;
-        if (!r.ok) { if (typeof callback === 'function') callback(false); return; }
-        state.allData = r.data;
-        state.loadedAt = Date.now();
-        state.version = r.version || '0|empty';
-        setSyncStatus('online');
-        if (r.config) applyConfig(r.config);
-        try {
-          sessionStorage.setItem('pendukung_cache_v1', JSON.stringify(r.data));
-          sessionStorage.setItem('pendukung_cache_at', String(state.loadedAt));
-          sessionStorage.setItem('pendukung_cache_version', state.version);
-          if (r.config) sessionStorage.setItem('pendukung_config', JSON.stringify(r.config));
-        } catch (e) {}
+        if (!r || !r.ok) { if (typeof callback === 'function') callback(false); return; }
+        const changed = !prevRev || r.rev !== prevRev;
+        applyBootstrap(r);
+        state.dataVersion = (state.dataVersion || 0) + 1;
         if (isStillOn(token, 'data') && $('dataGridWrap')) renderFilteredGrid(true);
         else if (isStillOn(token, 'dashboard') && $('appContent')) renderDashboardData();
         else if (isStillOn(token, 'detail-kampung') && $('appContent')) renderDetailKampung();
-        if (silent) showPullIndicator();
+        refreshOpenDetail();
+        if (silent && changed) {
+          showPullIndicator();
+          if (opts && opts.fromRemote && Date.now() > (state.quietSyncUntil || 0)) toast('🔄 Data diperbarui', 'info');
+        }
         if (typeof callback === 'function') callback(true);
-        if (isAdmin() && (!state._lastDupCheck || (Date.now() - state._lastDupCheck > 60000))) checkDupBadge();
       })
-      .withFailureHandler(e => {
+      .withFailureHandler(() => {
         state.isFetching = false;
         setSyncStatus('offline');
         if (typeof callback === 'function') callback(false);
       })
-      .apiGetList({});
+      .apiGetBootstrap({ fresh: true });
+  }
+
+  // Modal detail yang sedang terbuka ikut diperbarui (atau ditutup bila datanya dihapus perangkat lain)
+  function refreshOpenDetail() {
+    const id = state.detailWargaId;
+    if (!id || !$('modalDetailWarga') || !$('modalDetailWarga').classList.contains('show')) return;
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) {
+      $('modalDetailWarga').classList.remove('show');
+      state.detailWargaId = null;
+      toast('Data ini baru saja dihapus', 'warn');
+      return;
+    }
+    const sig = JSON.stringify(p);
+    if (state._detailSig === sig) return;
+    state._detailSig = sig;
+    renderModalDetailWarga(p);
   }
 
   function checkDupBadge() {
@@ -638,10 +657,10 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && sessionStorage.getItem('pendukung_auth') === '1') syncData(true);
+    if (!document.hidden && state.pollTimer) syncData(true);       // kembali ke aplikasi → langsung cek perubahan
   });
   window.addEventListener('focus', () => {
-    if (sessionStorage.getItem('pendukung_auth') === '1') syncData(true);
+    if (state.pollTimer) syncData(true);
   });
   window.addEventListener('online', () => { setSyncStatus('online'); syncData(true); });
   window.addEventListener('offline', () => setSyncStatus('offline'));
@@ -2830,6 +2849,7 @@
     if (!p) { toast('Data tidak ditemukan', 'error'); return; }
 
     state.detailWargaId = id;
+    state._detailSig = JSON.stringify(p);
     prefetchById(id);
     renderModalDetailWarga(p);
     $('modalDetailWarga').classList.add('show');
