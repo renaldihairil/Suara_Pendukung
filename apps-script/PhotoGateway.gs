@@ -3,6 +3,15 @@
  * Tempel SELURUH isi file ini sebagai file baru di project Apps Script
  * (File +  → Skrip → beri nama PhotoGateway), lalu isi PGW_KEY.
  *
+ * PENTING — aplikasi lama Anda SUDAH punya doPost (di Code.gs). Jangan buat doPost kedua.
+ * Ubah doPost yang lama di Code.gs menjadi:
+ *
+ *     function doPost(e) {
+ *       const pg = pgw_tryHandle_(e);   // permintaan jembatan foto (ada field "op")
+ *       if (pg) return pg;
+ *       return handleRequest(e);        // permintaan aplikasi lama (ada field "action")
+ *     }
+ *
  * Skrip ini berjalan atas nama AKUN ANDA, sehingga foto tersimpan di
  * Google Drive Anda (folder yang sama dengan aplikasi lama) tanpa token
  * yang kedaluwarsa. Memakai konstanta DRIVE_FOLDER_NAME & DRIVE_FOLDER_TTD
@@ -21,12 +30,19 @@ function pgw_folder_(name) {
   return it.hasNext() ? it.next() : DriveApp.createFolder(name);
 }
 
-function doPost(e) {
+/** Kembalikan ContentService output bila ini permintaan jembatan (punya "op"), selain itu null. */
+function pgw_tryHandle_(e) {
+  let req = null;
+  try { req = JSON.parse((e && e.postData && e.postData.contents) || 'null'); } catch (err) { return null; }
+  if (!req || typeof req !== 'object' || !req.op) return null;
+  return pgw_handle_(req);
+}
+
+function pgw_handle_(req) {
   try {
     if (String(PGW_KEY).indexOf('GANTI_') === 0 || String(PGW_KEY).length < 24) {
       return pgw_out_({ ok: false, message: 'PGW_KEY belum diisi (min. 24 karakter) di skrip' });
     }
-    const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (!req.key || req.key !== PGW_KEY) return pgw_out_({ ok: false, message: 'Kunci salah' });
 
     switch (req.op) {
