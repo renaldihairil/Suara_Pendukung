@@ -1,0 +1,19 @@
+{
+  "name": "pendukung-pilkades-pwa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Data Pendukung Pilkades - PWA (Admin + User) di Vercel, database Google Sheets",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "node mock/dev-server.js",
+    "start": "node mock/dev-server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "google-auth-library": "^9.14.0",
+    "googleapis": "^140.0.1",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

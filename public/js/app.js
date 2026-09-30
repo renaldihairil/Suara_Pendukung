@@ -1,0 +1,3670 @@
+(function(){
+  // ============================================================ //
+  // KONFIGURASI                                                   //
+  // ============================================================ //
+  const RT_LIST = ['001','002','003','004','005','006','007','008','009','010','UMUM'];
+  const RT_UMUM = 'UMUM';
+  const POLL_INTERVAL = 15000;
+  const PER_PAGE = 15;
+
+  let KAMPUNG_LIST = ['Sasak', 'Mandar', 'Barantapen Asri', 'Dames'];
+  let TARGET_PER_KAMPUNG = {};
+  let TARGET_TOTAL = 500;
+  let NAMA_PILKADES = 'Pilkades Seruni Mumbul 2026';
+  let NAMA_KANDIDAT = 'Pak Muhaimin (Pak Emen)';
+  let STATS_PER_KAMPUNG = {};
+  let STATS_VERIFIED_PER_KAMPUNG = {};
+
+  // ============================================================ //
+  // STATE                                                         //
+  // ============================================================ //
+  const state = {
+    page: 'dashboard',
+    pageToken: 0,
+    detailKampung: null,
+    detailFilterRT: '',
+    detailFilterVerif: '',
+    detailSortAZ: 'asc',   // ⭐ NEW: 'asc' | 'desc' | 'default'
+    detailLoading: false,
+    filter: { q: '', kampung: '', rt: '', verified: '', dicetak: '' },
+    currentPage: 1,
+    fotoBase64: null,
+    fotoMime: null,
+    editId: null,
+    confirmCb: null,
+    allData: null,
+    loadedAt: 0,
+    version: '0|empty',
+    pollTimer: null,
+    isFetching: false,
+    isOnline: true,
+    prevIds: {},
+    nikCheckTimer: null,
+    nikLastChecked: '',
+    nikIsDup: false,
+    dupData: null,
+    configLoaded: false,
+    scanResult: null,
+    dashboardCache: null,
+    cfgCache: null,
+    pdfGenerating: false,
+    ktpPdfGenerating: false,
+    detailWargaId: null,
+    verifyId: null,
+    verifyFotoTTDBase64: null,
+    verifyFotoTTDMime: null,
+    editFotoTTDBase64: null,
+    editFotoTTDMime: null,
+    editHapusTTD: false,
+    // ⭐ Ceklist massal status cetak: ids = { id: true }, pageIds = id kartu di halaman aktif
+    sel: { on: false, ids: {}, pageIds: [], busy: false },
+    user: null,               // { username, nama, role } dari /api/auth
+    usersCache: null,         // daftar user (halaman Kelola User, admin)
+    logsCache: null           // daftar log (halaman Log, admin)
+  };
+
+  // ============================================================ //
+  // ROLE & MENU                                                   //
+  // ============================================================ //
+  function isAdmin() { return !!(state.user && state.user.role === 'admin'); }
+
+  function applyRoleUI() {
+    const admin = isAdmin();
+    // Sembunyikan nav khusus admin untuk role user
+    document.querySelectorAll('[data-nav="input"], [data-nav="pengaturan"]').forEach(el => {
+      el.style.display = admin ? '' : 'none';
+    });
+    // Nav admin: Kelola User & Log (desktop + mobile)
+    document.querySelectorAll('[data-nav="users"], [data-nav="logs"]').forEach(el => {
+      el.style.display = admin ? '' : 'none';
+    });
+    const fab = $('fabScan');
+    if (fab) fab.style.display = admin ? '' : 'none';
+    // Nama user di header
+    const who = $('userBadge');
+    if (who) who.textContent = (state.user ? (state.user.nama || state.user.username) : '') + (admin ? ' • Admin' : '');
+    const whoM = $('userBadgeM');
+    if (whoM) whoM.textContent = who ? who.textContent : '';
+  }
+
+  function startAppAfterLogin() {
+    try { sessionStorage.setItem('pendukung_auth', '1'); } catch (e) {}
+    $('loginScreen').style.display = 'none';
+    $('mainApp').style.display = 'block';
+    const fab = $('fabScan');
+    if (fab && isAdmin()) fab.classList.add('show');
+    applyRoleUI();
+    loadConfig(() => {
+      state.page = 'dashboard';
+      state.pageToken++;
+      document.querySelectorAll('[data-nav]').forEach(el => {
+        el.classList.toggle('active', el.getAttribute('data-nav') === 'dashboard');
+      });
+      renderCurrentPage();
+      startPolling();
+      if (isAdmin()) checkDupBadge();
+      watchModals();
+    });
+  }
+
+  // ============================================================ //
+  // HELPERS                                                       //
+  // ============================================================ //
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+
+  function normRT(v) {
+    if (v == null) return '001';
+    let s = String(v).trim();
+    s = s.replace(/^['"]+/, '').replace(/['"]+$/, '');
+    if (!s) return '001';
+    const lower = s.toLowerCase();
+    if (lower === 'umum' || lower === 'u' || lower === 'um') {
+      return RT_UMUM;
+    }
+    if (/^\d{1,2}$/.test(s)) return s.padStart(3, '0');
+    if (/^\d{3,}$/.test(s)) return s.slice(-3);
+    const n = parseInt(s, 10);
+    if (!isNaN(n) && n > 0 && n < 1000) return String(n).padStart(3, '0');
+    return s;
+  }
+
+  function fmtNum(n) {
+    return String(parseInt(n, 10) || 0).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  }
+
+  function initialsOf(str) {
+    if (!str) return '?';
+    const words = String(str).trim().split(/\s+/).slice(0, 2);
+    return words.map(w => (w[0] || '').toUpperCase()).join('') || '?';
+  }
+
+  function rtLabel(rt) {
+    const n = normRT(rt);
+    return n === RT_UMUM ? 'UMUM' : ('RT ' + n);
+  }
+
+  // ============================================================ //
+  // ICONS                                                         //
+  // ============================================================ //
+  const ICONS = {
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    male: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="14" r="5"/><line x1="19" y1="5" x2="13.6" y2="10.4"/><polyline points="19 5 14 5 19 10"/></svg>',
+    female: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5"/><line x1="12" y1="14" x2="12" y2="22"/><line x1="8" y1="18" x2="16" y2="18"/></svg>',
+    home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+    camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+    gallery: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    save: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>',
+    card: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>',
+    dupScan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
+    prev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
+    next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
+    first: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',
+    last: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+    settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    flag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+    arrowLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
+    arrowRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>',
+    download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    ttd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c2 0 4-1 6-4s4-8 6-8 3 3 3 5-1 3-3 3"/><path d="M21 21H3"/></svg>',
+    eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+    // ⭐ ICON SORT
+    sortAZ: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h10"/><path d="M3 12h7"/><path d="M3 18h4"/><path d="M17 4v16"/><polyline points="13 16 17 20 21 16"/></svg>',
+    sortZA: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h4"/><path d="M3 12h7"/><path d="M3 18h10"/><path d="M17 20V4"/><polyline points="13 8 17 4 21 8"/></svg>',
+    // ⭐ ICON status cetak
+    printer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>'
+  };
+
+  function toast(msg, type) {
+    const t = $('toast');
+    if (!t) return;
+    let ico = ICONS.check;
+    if (type === 'error') ico = ICONS.warn;
+    if (type === 'warn') ico = ICONS.warn;
+    if (type === 'verified') ico = ICONS.shield;
+    t.innerHTML = ico + '<span>' + esc(msg) + '</span>';
+    t.className = 'toast show ' + (type || '');
+    clearTimeout(t._tm);
+    t._tm = setTimeout(() => t.className = 'toast ' + (type || ''), 3200);
+  }
+
+  function setSyncStatus(status) {
+    const dot = $('syncDot');
+    const txt = $('headerStatus');
+    if (!dot || !txt) return;
+    if (status === 'syncing') {
+      dot.className = 'sync-dot syncing';
+      txt.textContent = 'Sinkronisasi...';
+    } else if (status === 'offline') {
+      dot.className = 'sync-dot offline';
+      txt.textContent = 'Offline';
+    } else {
+      dot.className = 'sync-dot';
+      txt.textContent = 'Live • Pilkades 2026';
+    }
+  }
+
+  function showPullIndicator() {
+    const el = $('pullIndicator');
+    if (!el) return;
+    el.classList.add('show');
+    clearTimeout(el._tm);
+    el._tm = setTimeout(() => el.classList.remove('show'), 800);
+  }
+
+  function parseNIK(nik) {
+    nik = String(nik || '').trim();
+    if (!/^\d{16}$/.test(nik)) return { valid: false, msg: 'NIK harus 16 digit angka' };
+    let dd = parseInt(nik.substring(6, 8), 10);
+    const mm = parseInt(nik.substring(8, 10), 10);
+    const yy = parseInt(nik.substring(10, 12), 10);
+    let jk = 'Laki-laki';
+    if (dd > 40) { jk = 'Perempuan'; dd -= 40; }
+    const nowYY = new Date().getFullYear() % 100;
+    const tahun = (yy > nowYY) ? 1900 + yy : 2000 + yy;
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return { valid: false, msg: 'NIK tidak valid' };
+    const tgl = new Date(tahun, mm - 1, dd);
+    const today = new Date();
+    let usia = today.getFullYear() - tgl.getFullYear();
+    const mD = today.getMonth() - tgl.getMonth();
+    if (mD < 0 || (mD === 0 && today.getDate() < tgl.getDate())) usia--;
+    const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    return { valid: true, jenisKelamin: jk, usia, tglText: dd + ' ' + bulan[mm-1] + ' ' + tahun };
+  }
+
+  function compressImage(file, cb) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1280;
+        let w = img.width, h = img.height;
+        if (w > h && w > MAX) { h = h * MAX / w; w = MAX; }
+        else if (h > MAX) { w = w * MAX / h; h = MAX; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        cb(canvas.toDataURL('image/jpeg', 0.82), 'image/jpeg');
+      };
+      img.onerror = () => cb(null, null);
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => cb(null, null);
+    reader.readAsDataURL(file);
+  }
+
+  // ============================================================ //
+  // NAVIGASI                                                      //
+  // ============================================================ //
+  document.querySelectorAll('[data-nav]').forEach(el => {
+    el.addEventListener('click', () => {
+      const target = el.getAttribute('data-nav');
+      state.detailKampung = null;
+      state.detailFilterRT = '';
+      state.detailFilterVerif = '';
+      state.detailSortAZ = 'asc';
+      if (target === state.page && !state.detailKampung) return;
+      setPage(target);
+    });
+  });
+
+  function setPage(p) {
+    exitSelMode(false);
+    state.page = p;
+    state.pageToken++;
+    document.querySelectorAll('[data-nav]').forEach(el => {
+      el.classList.toggle('active', el.getAttribute('data-nav') === p);
+    });
+    updateFabVisibility();
+    renderCurrentPage();
+  }
+
+  function openDetailKampung(namaKampung) {
+    state.detailKampung = namaKampung;
+    state.detailFilterRT = '';
+    state.detailFilterVerif = '';
+    state.detailSortAZ = 'asc';
+    state.page = 'detail-kampung';
+    state.pageToken++;
+    document.querySelectorAll('[data-nav]').forEach(el => {
+      el.classList.toggle('active', el.getAttribute('data-nav') === 'dashboard');
+    });
+    updateFabVisibility();
+
+    if (!state.allData) {
+      const c = $('appContent');
+      if (c) c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat data...</p></div>';
+      state.detailLoading = true;
+      const token = state.pageToken;
+      fetchAndReplace(false, () => {
+        state.detailLoading = false;
+        if (isStillOn(token, 'detail-kampung')) renderDetailKampung();
+      });
+      return;
+    }
+    renderDetailKampung();
+  }
+
+  function closeDetailKampung() {
+    state.detailKampung = null;
+    state.detailFilterRT = '';
+    state.detailFilterVerif = '';
+    state.detailSortAZ = 'asc';
+    setPage('dashboard');
+  }
+
+  function renderCurrentPage() {
+    if (state.page === 'dashboard') renderDashboard();
+    else if (state.page === 'input') renderInput();
+    else if (state.page === 'data') renderData();
+    else if (state.page === 'pengaturan') renderPengaturan();
+    else if (state.page === 'detail-kampung') renderDetailKampung();
+    else if (state.page === 'users') renderUsers();
+    else if (state.page === 'logs') renderLogs();
+    else if (state.page === 'profil') renderProfil();
+  }
+
+  function isStillOn(token, page) {
+    return state.pageToken === token && state.page === page;
+  }
+
+  function updateFabVisibility() {
+    const fab = $('fabScan');
+    if (!fab) return;
+    const anyModalOpen = ['modalFoto','modalEdit','modalConfirm','modalDupWarning','modalScanDup','modalKampungEdit','modalDetailWarga','modalVerifTTD','modalCropFoto']
+      .some(id => { const m = $(id); return m && m.classList.contains('show'); });
+    if (anyModalOpen) {
+      fab.style.opacity = '0';
+      fab.style.pointerEvents = 'none';
+      fab.style.transform = 'scale(.5)';
+    } else {
+      fab.style.opacity = '1';
+      fab.style.pointerEvents = 'auto';
+      fab.style.transform = 'scale(1)';
+    }
+  }
+
+  function watchModals() {
+    setInterval(() => updateFabVisibility(), 500);
+  }
+
+  // ============================================================ //
+  // CONFIG LOADER                                                 //
+  // ============================================================ //
+  function applyConfig(cfg) {
+    if (!cfg) return;
+    KAMPUNG_LIST = (cfg.kampungList || []).slice();
+    TARGET_PER_KAMPUNG = cfg.targetPerKampung || {};
+    TARGET_TOTAL = parseInt(cfg.targetTotal, 10) || 500;
+    NAMA_PILKADES = cfg.namaPilkades || 'Pilkades Seruni Mumbul 2026';
+    NAMA_KANDIDAT = cfg.namaKandidat || 'Pak Muhaimin (Pak Emen)';
+    state.configLoaded = true;
+    state.cfgCache = cfg;
+    const sub = $('loginSub');
+    if (sub) sub.innerHTML = esc(NAMA_PILKADES) + '<br><strong>' + esc(NAMA_KANDIDAT) + '</strong>';
+    document.title = 'Data Pendukung ' + NAMA_KANDIDAT;
+  }
+
+  function loadConfig(cb) {
+    if (state.cfgCache) {
+      if (typeof cb === 'function') cb(state.cfgCache);
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(r => {
+        if (r.ok) {
+          applyConfig(r.data);
+          try { sessionStorage.setItem('pendukung_config', JSON.stringify(r.data)); } catch(e){}
+        }
+        if (typeof cb === 'function') cb(state.cfgCache);
+      })
+      .withFailureHandler(() => { if (typeof cb === 'function') cb(state.cfgCache); })
+      .apiGetConfig();
+  }
+
+  try {
+    const sc = sessionStorage.getItem('pendukung_config');
+    if (sc) applyConfig(JSON.parse(sc));
+  } catch (e) {}
+
+  // ============================================================ //
+  // LOGIN                                                         //
+  // ============================================================ //
+  $('loginBtn').addEventListener('click', doLogin);
+  $('loginPass').addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+
+  function doLogin() {
+    const uname = $('loginUser').value.trim();
+    const pw = $('loginPass').value;
+    if (!uname) { $('loginErr').textContent = 'Username wajib diisi'; return; }
+    if (!pw) { $('loginErr').textContent = 'Password wajib diisi'; return; }
+    $('loginBtn').disabled = true;
+    $('loginBtn').innerHTML = '<div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div>';
+    fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ op: 'login', username: uname, password: pw })
+    })
+      .then(r => r.json())
+      .then(r => {
+        $('loginBtn').disabled = false;
+        $('loginBtn').innerHTML = '<span class="btn-text">Masuk</span>';
+        if (r.ok) {
+          state.user = r.user || { username: uname, nama: uname, role: 'user' };
+          try { sessionStorage.setItem('pendukung_user', JSON.stringify(state.user)); } catch (e) {}
+          $('loginErr').textContent = '';
+          $('loginPass').value = '';
+          startAppAfterLogin();
+        } else {
+          $('loginErr').textContent = r.message || 'Login gagal';
+        }
+      })
+      .catch(e => {
+        $('loginBtn').disabled = false;
+        $('loginBtn').innerHTML = '<span class="btn-text">Masuk</span>';
+        $('loginErr').textContent = 'Gagal: ' + e.message;
+      });
+  }
+
+  $('logoutBtn').addEventListener('click', () => {
+    stopPolling();
+    try {
+      ['pendukung_auth', 'pendukung_user', 'pendukung_cache_v1', 'pendukung_cache_at', 'pendukung_cache_version', 'pendukung_config'].forEach(k => sessionStorage.removeItem(k));
+    } catch (e) {}
+    fetch('/api/auth', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'logout' }) })
+      .catch(() => {})
+      .then(() => location.reload());
+  });
+
+  // ============================================================ //
+  // BOOT: cek sesi ke server (auto-login & role)                  //
+  // ============================================================ //
+  (async function bootSession() {
+    let sesi = null;
+    try {
+      const r = await fetch('/api/auth', { credentials: 'same-origin' });
+      sesi = await r.json();
+    } catch (e) { sesi = null; }
+    if (sesi && sesi.ok && sesi.user) {
+      state.user = sesi.user;
+      try { sessionStorage.setItem('pendukung_user', JSON.stringify(sesi.user)); } catch (e) {}
+      startAppAfterLogin();
+    } else {
+      try {
+        ['pendukung_auth', 'pendukung_user'].forEach(k => sessionStorage.removeItem(k));
+      } catch (e) {}
+      $('loginScreen').style.display = 'flex';
+      const lu = $('loginUser');
+      if (lu) lu.focus();
+    }
+  })();
+
+  // ============================================================ //
+  // POLLING                                                       //
+  // ============================================================ //
+  function startPolling() {
+    stopPolling();
+    syncData(true);
+    state.pollTimer = setInterval(() => {
+      if (!document.hidden) syncData(true);
+    }, POLL_INTERVAL);
+  }
+
+  function stopPolling() {
+    if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  }
+
+  function syncData(silent) {
+    if (state.isFetching) return;
+    state.isFetching = true;
+    if (!silent) setSyncStatus('syncing');
+    google.script.run
+      .withSuccessHandler(r => {
+        if (!r.ok) { state.isFetching = false; if (!silent) setSyncStatus('offline'); return; }
+        const newVersion = r.version || '0|empty';
+        if (newVersion === state.version && state.allData) {
+          state.isFetching = false;
+          setSyncStatus('online');
+          return;
+        }
+        fetchAndReplace(silent);
+      })
+      .withFailureHandler(e => { state.isFetching = false; setSyncStatus('offline'); })
+      .apiGetVersion();
+  }
+
+  function fetchAndReplace(silent, callback) {
+    const token = state.pageToken;
+    google.script.run
+      .withSuccessHandler(r => {
+        state.isFetching = false;
+        if (!r.ok) { if (typeof callback === 'function') callback(false); return; }
+        state.allData = r.data;
+        state.loadedAt = Date.now();
+        state.version = r.version || '0|empty';
+        setSyncStatus('online');
+        if (r.config) applyConfig(r.config);
+        try {
+          sessionStorage.setItem('pendukung_cache_v1', JSON.stringify(r.data));
+          sessionStorage.setItem('pendukung_cache_at', String(state.loadedAt));
+          sessionStorage.setItem('pendukung_cache_version', state.version);
+          if (r.config) sessionStorage.setItem('pendukung_config', JSON.stringify(r.config));
+        } catch (e) {}
+        if (isStillOn(token, 'data') && $('dataGridWrap')) renderFilteredGrid(true);
+        else if (isStillOn(token, 'dashboard') && $('appContent')) renderDashboardData();
+        else if (isStillOn(token, 'detail-kampung') && $('appContent')) renderDetailKampung();
+        if (silent) showPullIndicator();
+        if (typeof callback === 'function') callback(true);
+        if (!state._lastDupCheck || (Date.now() - state._lastDupCheck > 60000)) checkDupBadge();
+      })
+      .withFailureHandler(e => {
+        state.isFetching = false;
+        setSyncStatus('offline');
+        if (typeof callback === 'function') callback(false);
+      })
+      .apiGetList({});
+  }
+
+  function checkDupBadge() {
+    state._lastDupCheck = Date.now();
+    google.script.run
+      .withSuccessHandler(r => { if (r.ok) updateFabBadge(r.totalGroup || 0); })
+      .withFailureHandler(() => {})
+      .apiScanDuplikat();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && sessionStorage.getItem('pendukung_auth') === '1') syncData(true);
+  });
+  window.addEventListener('focus', () => {
+    if (sessionStorage.getItem('pendukung_auth') === '1') syncData(true);
+  });
+  window.addEventListener('online', () => { setSyncStatus('online'); syncData(true); });
+  window.addEventListener('offline', () => setSyncStatus('offline'));
+
+  // ============================================================ //
+  // DASHBOARD                                                     //
+  // ============================================================ //
+  function renderDashboard() {
+    const c = $('appContent');
+    if (!c) return;
+    if (state.dashboardCache) {
+      renderDashboardData();
+      const token = state.pageToken;
+      google.script.run
+        .withSuccessHandler(r => {
+          if (r.ok && isStillOn(token, 'dashboard')) {
+            state.dashboardCache = r.data;
+            STATS_PER_KAMPUNG = r.data.perKampung || {};
+            STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
+            if (r.data.kampungList) applyConfig(r.data);
+            renderDashboardData();
+          }
+        })
+        .withFailureHandler(() => { if (isStillOn(token, 'dashboard')) setSyncStatus('offline'); })
+        .apiGetDashboard();
+      return;
+    }
+    c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat data...</p></div>';
+    const token = state.pageToken;
+    google.script.run
+      .withSuccessHandler(r => {
+        if (!isStillOn(token, 'dashboard')) return;
+        if (!r.ok) { c.innerHTML = emptyState('⚠️', 'Gagal', r.message); return; }
+        state.dashboardCache = r.data;
+        STATS_PER_KAMPUNG = r.data.perKampung || {};
+        STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
+        if (r.data.kampungList) applyConfig(r.data);
+        renderDashboardData();
+      })
+      .withFailureHandler(e => {
+        if (!isStillOn(token, 'dashboard')) return;
+        c.innerHTML = emptyState('⚠️', 'Gagal memuat', e.message);
+      })
+      .apiGetDashboard();
+  }
+
+  function renderDashboardData() {
+    const c = $('appContent');
+    const d = state.dashboardCache;
+    if (!d || !c) return;
+    const isUpdate = c.querySelector('.hero-number') !== null;
+    const persen = Math.min(100, Math.round((d.total / (d.target || 500)) * 100));
+    STATS_PER_KAMPUNG = d.perKampung || {};
+    STATS_VERIFIED_PER_KAMPUNG = d.kampungVerified || {};
+    const totalVerified = d.verified || 0;
+    const totalUnverified = d.unverified || 0;
+    const totalAll = d.total || 0;
+    const pctVerified = totalAll > 0 ? Math.round((totalVerified / totalAll) * 100) : 0;
+    const pctUnverified = totalAll > 0 ? (100 - pctVerified) : 0;
+    const totalDicetak = d.dicetak || 0;
+    const totalBelumCetak = d.belumCetak || 0;
+    const pctDicetak = totalAll > 0 ? Math.round((totalDicetak / totalAll) * 100) : 0;
+    const pctBelumCetak = totalAll > 0 ? (100 - pctDicetak) : 0;
+
+    let kampungHtml = '';
+    const list = d.kampungList || KAMPUNG_LIST;
+    const targetMap = d.targetPerKampung || TARGET_PER_KAMPUNG;
+    const verifiedMap = d.kampungVerified || {};
+
+    list.forEach(k => {
+      const jml = d.perKampung[k] || 0;
+      const verifCount = verifiedMap[k] || 0;
+      const target = parseInt(targetMap[k] || 0, 10);
+      const pct = target > 0 ? Math.min(100, Math.round((jml / target) * 100)) : 0;
+      let targetText = target > 0 ? (jml + ' / ' + target + ' • ' + pct + '%') : (jml + ' orang');
+      let verifInfo = '';
+      if (jml > 0) {
+        const pctV = Math.round((verifCount / jml) * 100);
+        verifInfo = ' • ✅ ' + verifCount + ' (' + pctV + '%)';
+      }
+      kampungHtml +=
+        '<div class="kampung-item" data-kampung="' + esc(k) + '">' +
+          '<div class="kampung-info">' +
+            '<div class="kampung-ico">' + ICONS.home + '</div>' +
+            '<div>' +
+              '<div class="kampung-name">' + esc(k) + '</div>' +
+              '<div class="kampung-detail">' + targetText + verifInfo + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="kampung-badge">' + jml + '<span class="arrow">' + ICONS.arrowRight + '</span></div>' +
+        '</div>';
+    });
+
+    let warnHtml = '';
+    if (d.unknownKampung && d.unknownKampung > 0) {
+      warnHtml = '<div style="background:#fef2f2;border-left:3px solid #dc2626;padding:12px 14px;border-radius:10px;margin-bottom:12px;font-size:12px;color:#991b1b">⚠️ Ada <b>' + d.unknownKampung + '</b> kampung di database yang tidak ada di daftar pengaturan. Buka <b>Atur</b> untuk memperbarui.</div>';
+    }
+
+    c.innerHTML =
+      '<div class="hero-card">' +
+        '<div class="hero-top"><div class="hero-label">Total Pendukung</div><div class="hero-icon">' + ICONS.users + '</div></div>' +
+        '<div class="hero-number' + (isUpdate ? ' bump' : '') + '">' + d.total + '</div>' +
+        '<div class="hero-sub">Target: ' + (d.target || 500) + ' orang • ' + persen + '% tercapai</div>' +
+        '<div class="hero-progress"><div style="width:' + persen + '%"></div></div>' +
+      '</div>' + warnHtml +
+      '<div class="stat-grid">' +
+        '<div class="stat-card">' +
+          '<div class="stat-top"><span class="stat-label">Laki-laki</span><div class="stat-badge badge-blue">' + ICONS.male + '</div></div>' +
+          '<div class="stat-value">' + d.laki + '</div>' +
+          '<div class="stat-sub">' + (totalAll > 0 ? Math.round((d.laki / totalAll) * 100) : 0) + '% dari total</div>' +
+        '</div>' +
+        '<div class="stat-card">' +
+          '<div class="stat-top"><span class="stat-label">Perempuan</span><div class="stat-badge badge-pink">' + ICONS.female + '</div></div>' +
+          '<div class="stat-value">' + d.perempuan + '</div>' +
+          '<div class="stat-sub">' + (totalAll > 0 ? Math.round((d.perempuan / totalAll) * 100) : 0) + '% dari total</div>' +
+        '</div>' +
+        '<div class="stat-card verified-card">' +
+          '<div class="stat-top"><span class="stat-label">✅ Suara PASTI</span><div class="stat-badge badge-emerald">' + ICONS.shield + '</div></div>' +
+          '<div class="stat-value">' + totalVerified + '</div>' +
+          '<div class="stat-sub">' + pctVerified + '% sudah verifikasi TTD</div>' +
+        '</div>' +
+        '<div class="stat-card unverified-card">' +
+          '<div class="stat-top"><span class="stat-label">⏳ Suara Belum Pasti</span><div class="stat-badge badge-slate">' + ICONS.clock + '</div></div>' +
+          '<div class="stat-value">' + totalUnverified + '</div>' +
+          '<div class="stat-sub">' + pctUnverified + '% belum verifikasi</div>' +
+        '</div>' +
+        '<div class="stat-card printed-card">' +
+          '<div class="stat-top"><span class="stat-label">🖨️ Sudah Dicetak</span><div class="stat-badge badge-blue">' + ICONS.printer + '</div></div>' +
+          '<div class="stat-value">' + totalDicetak + '</div>' +
+          '<div class="stat-sub">' + pctDicetak + '% sudah print out</div>' +
+        '</div>' +
+        '<div class="stat-card unprinted-card">' +
+          '<div class="stat-top"><span class="stat-label">📄 Belum Dicetak</span><div class="stat-badge badge-slate">' + ICONS.printer + '</div></div>' +
+          '<div class="stat-value">' + totalBelumCetak + '</div>' +
+          '<div class="stat-sub">' + pctBelumCetak + '% belum print out</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:10px;margin-bottom:14px;padding:12px 14px;background:#f8fafc;border-radius:12px;border:1px dashed var(--border);font-size:11px;color:var(--text-sec);line-height:1.6">' +
+        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
+          '<div style="width:12px;height:12px;border-radius:3px;background:linear-gradient(135deg,var(--verified),var(--verified-dark))"></div>' +
+          '<b style="color:var(--verified-dark)">PASTI</b> = TTD + Fotokopi KTP' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
+          '<div style="width:12px;height:12px;border-radius:3px;background:linear-gradient(135deg,#cbd5e1,#94a3b8)"></div>' +
+          '<b style="color:var(--unverified-dark)">BELUM</b> = Belum TTD' +
+        '</div>' +
+      '</div>' +
+      '<div class="section-title">Data per Kampung <span style="font-size:11px;font-weight:500;color:var(--muted);margin-left:auto">👆 Klik untuk detail</span></div>' +
+      '<div class="kampung-list">' + kampungHtml + '</div>';
+
+    c.querySelectorAll('[data-kampung]').forEach(el => {
+      el.addEventListener('click', () => {
+        const k = el.getAttribute('data-kampung');
+        if (k) openDetailKampung(k);
+      });
+    });
+  }
+
+  // ============================================================ //
+  // ⭐ HALAMAN DETAIL KAMPUNG (dengan Sort A-Z)                   //
+  // ============================================================ //
+  function renderDetailKampung() {
+    const c = $('appContent');
+    if (!c) return;
+    const kampung = state.detailKampung;
+    if (!kampung) { closeDetailKampung(); return; }
+
+    if (!state.allData) {
+      c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat data...</p></div>';
+      const token = state.pageToken;
+      state.detailLoading = true;
+      fetchAndReplace(false, () => {
+        state.detailLoading = false;
+        if (isStillOn(token, 'detail-kampung')) renderDetailKampung();
+      });
+      return;
+    }
+
+    const kampungKey = String(kampung).trim().toLowerCase();
+    const allList = state.allData || [];
+    const listKampung = allList.filter(x => String(x.kampung || '').trim().toLowerCase() === kampungKey);
+
+    // Hitung per RT
+    const rtCounts = {};
+    RT_LIST.forEach(rt => rtCounts[rt] = 0);
+    listKampung.forEach(x => {
+      const rt = normRT(x.rt);
+      rtCounts[rt] = (rtCounts[rt] || 0) + 1;
+    });
+
+    // Filter
+    let filtered = listKampung;
+    if (state.detailFilterRT) {
+      const targetRT = normRT(state.detailFilterRT);
+      filtered = filtered.filter(x => normRT(x.rt) === targetRT);
+    }
+
+    if (state.detailFilterVerif === 'true') {
+      filtered = filtered.filter(x => x.verified === true);
+    } else if (state.detailFilterVerif === 'false') {
+      filtered = filtered.filter(x => x.verified !== true);
+    }
+
+    const verifiedInRT = filtered.filter(x => x.verified === true).length;
+    const unverifiedInRT = filtered.filter(x => x.verified !== true).length;
+    const totalInRT = filtered.length;
+
+    // ⭐ SORT LOGIC: A-Z atau Z-A atau Default (by RT lalu nama)
+    filtered = filtered.slice();
+    if (state.detailSortAZ === 'asc') {
+      filtered.sort((a, b) => (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' }));
+    } else if (state.detailSortAZ === 'desc') {
+      filtered.sort((a, b) => (b.nama || '').localeCompare(a.nama || '', 'id', { sensitivity: 'base' }));
+    } else {
+      // Default: by RT lalu nama
+      filtered.sort((a, b) => {
+        const rtA = normRT(a.rt), rtB = normRT(b.rt);
+        if (rtA !== rtB) return rtA.localeCompare(rtB);
+        return (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' });
+      });
+    }
+
+    const verifiedInView = filtered.filter(x => x.verified === true).length;
+    const unverifiedInView = filtered.length - verifiedInView;
+
+    // RT chips
+    let rtChipsHtml = '';
+    const totalAllKampung = listKampung.length;
+    const activeAll = !state.detailFilterRT ? 'active' : '';
+    rtChipsHtml += '<button class="rt-chip ' + activeAll + '" data-rt="" type="button">Semua <span class="count">' + totalAllKampung + '</span></button>';
+    RT_LIST.forEach(rt => {
+      const cnt = rtCounts[rt] || 0;
+      if (cnt === 0) return;
+      const active = (state.detailFilterRT && normRT(state.detailFilterRT) === rt) ? 'active' : '';
+      const label = rt === RT_UMUM ? 'UMUM' : ('RT ' + rt);
+      rtChipsHtml += '<button class="rt-chip ' + active + '" data-rt="' + rt + '" type="button">' + label + ' <span class="count">' + cnt + '</span></button>';
+    });
+
+    // Verif chips
+    const vchipAllActive = state.detailFilterVerif === '' ? 'active' : '';
+    const vchipVActive = state.detailFilterVerif === 'true' ? 'active verified' : '';
+    const vchipUActive = state.detailFilterVerif === 'false' ? 'active unverified' : '';
+
+    const vChipsHtml =
+      '<button class="vchip ' + vchipAllActive + '" data-vfilter="" type="button">' +
+        ICONS.users + ' Semua <span class="count">' + totalInRT + '</span>' +
+      '</button>' +
+      '<button class="vchip ' + vchipVActive + '" data-vfilter="true" type="button">' +
+        ICONS.shield + ' PASTI <span class="count">' + verifiedInRT + '</span>' +
+      '</button>' +
+      '<button class="vchip ' + vchipUActive + '" data-vfilter="false" type="button">' +
+        ICONS.clock + ' Belum <span class="count">' + unverifiedInRT + '</span>' +
+      '</button>';
+
+    // ⭐ SORT BUTTON: toggle A-Z <-> Z-A
+    const sortIsAsc = state.detailSortAZ !== 'desc';
+    const sortLabel = sortIsAsc ? 'A - Z' : 'Z - A';
+    const sortIcon = sortIsAsc ? ICONS.sortAZ : ICONS.sortZA;
+    const sortBtnHtml =
+      '<button class="sort-btn ' + (state.detailSortAZ !== 'default' ? 'active' : '') + '" id="btnSortAZ" type="button" title="Urutkan berdasarkan nama">' +
+        sortIcon + ' <span>' + sortLabel + '</span>' +
+      '</button>';
+
+    const rtLbl = state.detailFilterRT ? (state.detailFilterRT === RT_UMUM ? 'UMUM' : ('RT ' + normRT(state.detailFilterRT))) : 'Semua RT';
+    const verifLabel = state.detailFilterVerif === 'true' ? ' • PASTI' : (state.detailFilterVerif === 'false' ? ' • Belum' : '');
+    const headerTitle = 'Kp. ' + kampung;
+
+    let tableHtml = '';
+    if (filtered.length === 0) {
+      tableHtml =
+        '<div class="table-empty">' +
+          '<div class="big">📭</div>' +
+          '<h4>Tidak Ada Data</h4>' +
+          '<p>Belum ada pendukung untuk filter ini</p>' +
+        '</div>';
+    } else {
+      tableHtml = '<div class="table-scroll"><table class="data-table"><thead><tr>' +
+        '<th class="col-no">NO</th>' +
+        '<th>NAMA</th>' +
+        '<th class="col-nik">NIK</th>' +
+        '<th class="col-status">STATUS</th>' +
+        '</tr></thead><tbody>';
+      filtered.forEach((p, idx) => {
+        const isVerified = p.verified === true;
+        const statusClass = isVerified ? 'verified' : 'unverified';
+        const statusLabel = isVerified ? 'PASTI' : 'BELUM';
+        tableHtml +=
+          '<tr>' +
+            '<td class="col-no">' + (idx + 1) + '</td>' +
+            '<td class="col-nama">' + esc(p.nama) + '</td>' +
+            '<td class="col-nik">' + esc(p.nik) + '</td>' +
+            '<td class="col-status">' +
+              '<span class="status-dot ' + statusClass + '" title="' + statusLabel + '"></span>' +
+            '</td>' +
+          '</tr>';
+      });
+      tableHtml += '</tbody></table></div>';
+      tableHtml += '<div class="table-footer">Total: ' + filtered.length + ' data' +
+        (state.detailFilterRT ? (' • ' + (state.detailFilterRT === RT_UMUM ? 'UMUM' : ('RT ' + normRT(state.detailFilterRT)))) : '') +
+        (state.detailFilterVerif === 'true' ? ' • ✅ PASTI' : (state.detailFilterVerif === 'false' ? ' • ⏳ Belum' : '')) +
+        '</div>';
+    }
+
+    c.innerHTML =
+      '<div class="detail-header">' +
+        '<div class="detail-top">' +
+          '<button class="detail-back" id="btnBackDetail" title="Kembali" type="button">' + ICONS.arrowLeft + '</button>' +
+          '<div class="detail-title-block">' +
+            '<div class="detail-label">DETAIL KAMPUNG</div>' +
+            '<div class="detail-title">' + esc(headerTitle) + '</div>' +
+            '<div class="detail-subtitle">' + rtLbl + verifLabel + ' • ' + filtered.length + ' data</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="detail-stats">' +
+          '<div class="detail-stat"><div class="n">' + filtered.length + '</div><div class="l">Tampil</div></div>' +
+          '<div class="detail-stat" style="background:rgba(16,185,129,.15);border-color:rgba(16,185,129,.3)"><div class="n">' + verifiedInView + '</div><div class="l">✅ Pasti</div></div>' +
+          '<div class="detail-stat" style="background:rgba(148,163,184,.15);border-color:rgba(148,163,184,.3)"><div class="n">' + unverifiedInView + '</div><div class="l">⏳ Belum</div></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="detail-filter">' +
+        '<div class="detail-filter-label">Filter RT</div>' +
+        '<div class="rt-chips">' + rtChipsHtml + '</div>' +
+      '</div>' +
+
+      '<div class="detail-filter">' +
+        '<div class="detail-filter-label">Filter Verifikasi</div>' +
+        '<div class="filter-verified-bar" style="margin-top:0">' + vChipsHtml + '</div>' +
+      '</div>' +
+
+      // ⭐ SORT BAR
+      '<div class="detail-sort-bar">' +
+        '<div class="detail-sort-label">' + ICONS.sortAZ + ' Urutkan Nama</div>' +
+        '<div class="detail-sort-buttons">' +
+          sortBtnHtml +
+        '</div>' +
+      '</div>' +
+
+      '<div class="detail-actions">' +
+        (!isAdmin() ? '' :
+        '<button class="btn-download" id="btnDownloadPdf" ' + (filtered.length === 0 ? 'disabled' : '') + ' type="button">' +
+          ICONS.download + ' Download PDF (A4)' +
+        '</button>') +
+      '</div>' +
+
+      '<div class="table-wrap">' + tableHtml + '</div>';
+
+    // Bind back
+    const btnBack = $('btnBackDetail');
+    if (btnBack) btnBack.addEventListener('click', closeDetailKampung);
+
+    // Bind RT chips
+    c.querySelectorAll('.rt-chip').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const rtValue = btn.getAttribute('data-rt') || '';
+        state.detailFilterRT = rtValue;
+        renderDetailKampung();
+      });
+    });
+
+    // Bind Verif chips
+    c.querySelectorAll('[data-vfilter]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const vValue = btn.getAttribute('data-vfilter') || '';
+        state.detailFilterVerif = vValue;
+        renderDetailKampung();
+      });
+    });
+
+    // ⭐ Bind Sort button
+    const btnSort = $('btnSortAZ');
+    if (btnSort) {
+      btnSort.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Toggle: asc -> desc -> asc (tidak balik ke default)
+        if (state.detailSortAZ === 'asc') {
+          state.detailSortAZ = 'desc';
+        } else {
+          state.detailSortAZ = 'asc';
+        }
+        renderDetailKampung();
+      });
+    }
+
+    // Bind Download
+    const btnDl = $('btnDownloadPdf');
+    if (btnDl) {
+      btnDl.addEventListener('click', () => {
+        downloadPdfDetail(kampung, state.detailFilterRT, state.detailFilterVerif, filtered);
+      });
+    }
+  }
+
+  // ============================================================ //
+  // EXPORT PDF A4                                                 //
+  // ============================================================ //
+  function downloadPdfDetail(kampung, rtFilter, verifFilter, dataList) {
+    if (state.pdfGenerating) return;
+    state.pdfGenerating = true;
+    const btn = $('btnDownloadPdf');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Membuat PDF...';
+    }
+
+    try {
+      const { jsPDF } = window.jspdf;
+      if (!jsPDF) {
+        toast('Library PDF belum siap. Coba lagi sebentar.', 'error');
+        resetPdfButton();
+        return;
+      }
+
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const marginL = 15;
+      const marginR = 15;
+      const marginT = 15;
+      const marginB = 15;
+
+      let y = marginT;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(13, 110, 63);
+      doc.text('DATA KTP DUKUNGAN UNTUK PAK MUHAIMIN (PAK EMEN)', pageW / 2, y, { align: 'center' });
+      y += 7;
+
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      const rtLbl = rtFilter
+        ? (rtFilter === RT_UMUM ? 'UMUM' : ('RT ' + normRT(rtFilter)))
+        : 'Semua RT';
+      let verifLbl = '';
+      if (verifFilter === 'true') verifLbl = '  |  STATUS: PASTI';
+      else if (verifFilter === 'false') verifLbl = '  |  STATUS: BELUM PASTI';
+      else verifLbl = '  |  STATUS: SEMUA';
+
+      doc.text('PADA PILKADES SERUNI MUMBUL 2026  |  Kp. ' + kampung + ' ' + rtLbl + verifLbl, pageW / 2, y, { align: 'center' });
+      y += 4;
+
+      doc.setDrawColor(13, 110, 63);
+      doc.setLineWidth(0.5);
+      doc.line(marginL, y, pageW - marginR, y);
+      y += 6;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      doc.text('Total: ' + dataList.length + ' pendukung  |  Dicetak: ' + formatTanggalIndo(new Date()), marginL, y);
+      y += 5;
+
+      const bodyRows = dataList.map((p, idx) => {
+        const isVerified = p.verified === true;
+        const statusText = isVerified ? 'PASTI' : 'BELUM';
+        return [String(idx + 1), p.nama || '', p.nik || '', statusText];
+      });
+
+      doc.autoTable({
+        startY: y,
+        head: [['NO', 'NAMA', 'NIK', 'STATUS']],
+        body: bodyRows,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [13, 110, 63],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 10,
+          halign: 'center',
+          valign: 'middle',
+          cellPadding: 2.5
+        },
+        bodyStyles: {
+          fontSize: 9.5,
+          textColor: [15, 23, 42],
+          cellPadding: 2.2,
+          valign: 'middle'
+        },
+        alternateRowStyles: { fillColor: [240, 253, 244] },
+        columnStyles: {
+          0: { cellWidth: 15, halign: 'center', fontStyle: 'bold' },
+          1: { cellWidth: 'auto', halign: 'left' },
+          2: { cellWidth: 50, halign: 'left', font: 'courier' },
+          3: { cellWidth: 25, halign: 'center', fontStyle: 'bold' }
+        },
+        margin: { left: marginL, right: marginR, top: marginT, bottom: marginB },
+        didParseCell: function(data) {
+          if (data.section === 'body' && data.column.index === 3) {
+            const statusVal = String(data.cell.raw || '').toUpperCase();
+            if (statusVal === 'PASTI') {
+              data.cell.styles.textColor = [5, 150, 105];
+              data.cell.styles.fillColor = [209, 250, 229];
+            } else if (statusVal === 'BELUM') {
+              data.cell.styles.textColor = [100, 116, 139];
+              data.cell.styles.fillColor = [241, 245, 249];
+            }
+          }
+        },
+        didDrawPage: function(data) {
+          const pageNum = doc.internal.getCurrentPageInfo().pageNumber;
+          const totalPages = doc.internal.getNumberOfPages();
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(148, 163, 184);
+          doc.text('Halaman ' + pageNum + ' dari ' + totalPages, pageW / 2, pageH - 8, { align: 'center' });
+          doc.text('Data Pendukung Pak Emen - Pilkades 2026', marginL, pageH - 8);
+        }
+      });
+
+      const statusSuffix = verifFilter === 'true' ? '_PASTI' : (verifFilter === 'false' ? '_BELUM' : '_SEMUA');
+      const rtSuffix = rtFilter ? ('_' + (rtFilter === RT_UMUM ? 'UMUM' : ('RT_' + normRT(rtFilter)))) : '_SemuaRT';
+      const sortSuffix = state.detailSortAZ === 'desc' ? '_ZA' : '_AZ';
+      const namaFile = 'Data_KTP_' + slugify(kampung) + rtSuffix + statusSuffix + sortSuffix + '_' + formatTanggalFile(new Date()) + '.pdf';
+      doc.save(namaFile);
+      toast('✅ PDF berhasil di-download', 'success');
+    } catch (e) {
+      console.error('PDF Error:', e);
+      toast('Gagal buat PDF: ' + e.message, 'error');
+    } finally {
+      resetPdfButton();
+    }
+  }
+
+  function resetPdfButton() {
+    state.pdfGenerating = false;
+    const btn = $('btnDownloadPdf');
+    if (btn) { btn.disabled = false; btn.innerHTML = ICONS.download + ' Download PDF (A4)'; }
+  }
+
+  function slugify(s) {
+    return String(s || '').trim().replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+  }
+
+  function formatTanggalIndo(d) {
+    const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    return d.getDate() + ' ' + bulan[d.getMonth()] + ' ' + d.getFullYear();
+  }
+
+  function formatTanggalFile(d) {
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes());
+  }
+
+  // ============================================================ //
+  // ⭐ DOWNLOAD FOTO KTP → PDF A4 (untuk print, foto di tengah)     //
+  // ============================================================ //
+  window.__downloadKtpA4 = function(id, btnEl) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) { toast('Data tidak ditemukan', 'error'); return; }
+    if (!p.fotoKTPId) { toast('Belum ada foto KTP untuk data ini', 'error'); return; }
+    if (state.ktpPdfGenerating) return;
+    state.ktpPdfGenerating = true;
+
+    const originalHtml = btnEl ? btnEl.innerHTML : '';
+    if (btnEl) {
+      btnEl.disabled = true;
+      btnEl.innerHTML = '<div class="spinner" style="width:13px;height:13px;border-width:2px;margin:0;border-color:rgba(7,89,133,.25);border-top-color:currentColor"></div>';
+    }
+
+    const finish = () => {
+      state.ktpPdfGenerating = false;
+      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = originalHtml; }
+    };
+
+    google.script.run
+      .withSuccessHandler(r => {
+        if (!r.ok) { toast('Gagal ambil foto KTP: ' + r.message, 'error'); finish(); return; }
+        buildKtpPdf(p, r.dataUrl, finish);
+      })
+      .withFailureHandler(e => {
+        toast('Gagal: ' + e.message, 'error');
+        finish();
+      })
+      .apiGetFotoBase64(p.fotoKTPId);
+  };
+
+  // ⭐ Render ulang gambar lewat canvas → JPEG. Decoder PNG bawaan jsPDF kadang
+  // gagal ("Incomplete or corrupt PNG file") walau file PNG-nya valid & bisa
+  // ditampilkan browser — canvas re-encode ini menghindari masalah itu.
+  // maxPx (opsional) membatasi sisi terpanjang supaya PDF massal tidak kebesaran.
+  function imgToJpeg(img, maxPx) {
+    let natW = img.naturalWidth || img.width || 1;
+    let natH = img.naturalHeight || img.height || 1;
+    if (maxPx && Math.max(natW, natH) > maxPx) {
+      const k = maxPx / Math.max(natW, natH);
+      natW = Math.round(natW * k);
+      natH = Math.round(natH * k);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = natW;
+    canvas.height = natH;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, natW, natH);
+    ctx.drawImage(img, 0, 0, natW, natH);
+    return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), w: natW, h: natH };
+  }
+
+  // Gambar 1 halaman A4: foto KTP di tengah kertas + nama/NIK kecil di bawah
+  function drawKtpA4Page(doc, jpeg, p) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+
+    // Batas ukuran cetak di A4 (dibuat sedekat mungkin ukuran KTP asli ±
+    // 100x64mm supaya tidak terlalu besar di kertas), foto tetap proporsional (tidak gepeng)
+    const maxW = 100, maxH = 64;
+    const aspect = jpeg.w / jpeg.h;
+
+    let drawW = maxW, drawH = maxW / aspect;
+    if (drawH > maxH) { drawH = maxH; drawW = maxH * aspect; }
+
+    const x = (pageW - drawW) / 2;
+    const y = (pageH - drawH) / 2;
+
+    doc.addImage(jpeg.dataUrl, 'JPEG', x, y, drawW, drawH);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text(String(p.nama || '') + '  •  ' + String(p.nik || ''), pageW / 2, pageH - 12, { align: 'center' });
+  }
+
+  function loadImage(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Gagal memuat gambar KTP'));
+      img.src = dataUrl;
+    });
+  }
+
+  function buildKtpPdf(p, dataUrl, done) {
+    const { jsPDF } = window.jspdf || {};
+    if (!jsPDF) { toast('Library PDF belum siap, coba lagi', 'error'); done(); return; }
+
+    loadImage(dataUrl)
+      .then(img => {
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        drawKtpA4Page(doc, imgToJpeg(img), p);
+        doc.save('KTP_' + slugify(p.nama) + '_' + (p.nik || '') + '.pdf');
+        toast('✅ PDF KTP siap di-print (A4)', 'success');
+      })
+      .catch(err => {
+        console.error('KTP PDF error:', err);
+        toast('Gagal buat PDF: ' + err.message, 'error');
+      })
+      .then(done);
+  }
+
+  // ============================================================ //
+  // ⭐ DOWNLOAD KTP MASSAL → 1 PDF A4 (1 KTP per halaman, di tengah) //
+  // ============================================================ //
+  // Mengikuti filter Kampung / RT / Pencarian / Status Suara yang
+  // sedang aktif di halaman Data. Status cetak dipilih di modal.
+  function getBulkKtpBaseList() {
+    let list = state.allData || [];
+    if (state.filter.kampung) list = list.filter(x => String(x.kampung || '').trim() === String(state.filter.kampung).trim());
+    if (state.filter.rt) {
+      const targetRT = normRT(state.filter.rt);
+      list = list.filter(x => normRT(x.rt) === targetRT);
+    }
+    if (state.filter.q) {
+      const q = state.filter.q.toLowerCase();
+      list = list.filter(x => (x.nama || '').toLowerCase().includes(q) || (x.nik || '').includes(q));
+    }
+    if (state.filter.verified === 'true') list = list.filter(x => x.verified === true);
+    else if (state.filter.verified === 'false') list = list.filter(x => x.verified !== true);
+    return list.filter(x => x.fotoKTPId && String(x.fotoKTPId).trim());
+  }
+
+  function bulkKtpFilterLabel() {
+    const parts = [];
+    if (state.filter.kampung) parts.push(state.filter.kampung);
+    if (state.filter.rt) parts.push(state.filter.rt === RT_UMUM ? 'UMUM' : ('RT ' + normRT(state.filter.rt)));
+    if (state.filter.verified === 'true') parts.push('Suara Pasti');
+    else if (state.filter.verified === 'false') parts.push('Belum Pasti');
+    if (state.filter.q) parts.push('"' + state.filter.q + '"');
+    return parts.length ? parts.join(' • ') : 'Semua data';
+  }
+
+  window.__openBulkKtp = function() {
+    if (state.bulkKtp) {
+      $('modalBulkKtp').classList.add('show');
+      return;
+    }
+    const base = getBulkKtpBaseList();
+    const belum = base.filter(x => x.dicetak !== true);
+    const sudah = base.filter(x => x.dicetak === true);
+    // Default pilih "Belum Dicetak" (paling sering dipakai), kecuali kosong
+    const sel = belum.length ? 'false' : 'true';
+
+    $('modalBulkKtpContent').innerHTML =
+      '<div class="bulk-ktp-head">' +
+        '<div class="bulk-ktp-icon">' + ICONS.download + '</div>' +
+        '<h3>Download KTP Massal</h3>' +
+        '<p>1 file PDF ukuran A4, 1 KTP per halaman (di tengah kertas)</p>' +
+      '</div>' +
+      '<div class="bulk-ktp-scope">Filter aktif: <b>' + esc(bulkKtpFilterLabel()) + '</b></div>' +
+      '<div class="bulk-ktp-label">Mau download yang mana?</div>' +
+      '<div class="bulk-ktp-opts">' +
+        '<label class="bulk-ktp-opt' + (belum.length ? '' : ' disabled') + '">' +
+          '<input type="radio" name="bulkKtpStatus" value="false"' + (sel === 'false' ? ' checked' : '') + (belum.length ? '' : ' disabled') + '>' +
+          '<span class="bko-title">📄 Belum Dicetak</span>' +
+          '<span class="bko-count">' + belum.length + ' KTP</span>' +
+        '</label>' +
+        '<label class="bulk-ktp-opt' + (sudah.length ? '' : ' disabled') + '">' +
+          '<input type="radio" name="bulkKtpStatus" value="true"' + (sel === 'true' ? ' checked' : '') + (sudah.length ? '' : ' disabled') + '>' +
+          '<span class="bko-title">🖨️ Sudah Dicetak</span>' +
+          '<span class="bko-count">' + sudah.length + ' KTP</span>' +
+        '</label>' +
+      '</div>' +
+      '<label class="bulk-ktp-mark" id="bulkKtpMarkWrap">' +
+        '<input type="checkbox" id="bulkKtpMark" checked>' +
+        '<span>Setelah PDF selesai, tandai otomatis sebagai <b>Sudah Dicetak</b></span>' +
+      '</label>' +
+      '<div class="bulk-ktp-note">Data tanpa foto KTP otomatis dilewati.</div>' +
+      '<div class="bulk-ktp-progress" id="bulkKtpProgress" style="display:none">' +
+        '<div class="bkp-bar"><div class="bkp-fill" id="bulkKtpFill"></div></div>' +
+        '<div class="bkp-text" id="bulkKtpText">Menyiapkan...</div>' +
+      '</div>' +
+      '<div class="confirm-btns">' +
+        '<button class="btn btn-outline" id="bulkKtpCancel" type="button">Batal</button>' +
+        '<button class="btn-download" id="bulkKtpStart" type="button"' + ((belum.length || sudah.length) ? '' : ' disabled') + '>' + ICONS.download + ' Download</button>' +
+      '</div>';
+
+    const syncMark = () => {
+      const r = document.querySelector('input[name="bulkKtpStatus"]:checked');
+      $('bulkKtpMarkWrap').style.display = (r && r.value === 'false') ? '' : 'none';
+    };
+    document.querySelectorAll('input[name="bulkKtpStatus"]').forEach(r => r.addEventListener('change', syncMark));
+    syncMark();
+
+    $('bulkKtpCancel').addEventListener('click', closeBulkKtp);
+    $('bulkKtpStart').addEventListener('click', () => {
+      const r = document.querySelector('input[name="bulkKtpStatus"]:checked');
+      if (!r) { toast('Pilih status cetak dulu', 'error'); return; }
+      const wantPrinted = r.value === 'true';
+      const list = wantPrinted ? sudah : belum;
+      const mark = !wantPrinted && $('bulkKtpMark').checked;
+      runBulkKtp(list, wantPrinted, mark);
+    });
+
+    $('modalBulkKtp').classList.add('show');
+  };
+
+  function closeBulkKtp() {
+    if (state.bulkKtp) {
+      state.bulkKtp.cancelled = true;
+      const t = $('bulkKtpText');
+      if (t) t.textContent = 'Membatalkan...';
+      return;
+    }
+    $('modalBulkKtp').classList.remove('show');
+  }
+
+  function fetchFotoBase64(fileId) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(r => r && r.ok ? resolve(r.dataUrl) : reject(new Error((r && r.message) || 'Gagal ambil foto')))
+        .withFailureHandler(e => reject(e))
+        .apiGetFotoBase64(fileId);
+    });
+  }
+
+  function runBulkKtp(list, wantPrinted, markAfter) {
+    const { jsPDF } = window.jspdf || {};
+    if (!jsPDF) { toast('Library PDF belum siap, coba lagi', 'error'); return; }
+    if (!list.length) { toast('Tidak ada KTP untuk di-download', 'error'); return; }
+
+    const job = state.bulkKtp = { cancelled: false };
+    const total = list.length;
+    const images = new Array(total);   // hasil JPEG per index (urutan halaman tetap)
+    const failed = [];
+    let doneCount = 0;
+
+    const btnStart = $('bulkKtpStart');
+    btnStart.disabled = true;
+    btnStart.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Memproses...';
+    $('bulkKtpCancel').textContent = 'Batalkan';
+    document.querySelectorAll('#modalBulkKtpContent input').forEach(i => { i.disabled = true; });
+    $('bulkKtpProgress').style.display = '';
+
+    const updateProgress = () => {
+      $('bulkKtpFill').style.width = Math.round((doneCount / total) * 100) + '%';
+      $('bulkKtpText').textContent = 'Mengambil foto ' + doneCount + ' / ' + total + (failed.length ? ' (' + failed.length + ' gagal)' : '');
+    };
+    updateProgress();
+
+    // Ambil foto paralel terbatas (3 sekaligus) supaya cepat tapi tidak membebani Apps Script
+    let next = 0;
+    const worker = () => {
+      if (job.cancelled || next >= total) return Promise.resolve();
+      const idx = next++;
+      const p = list[idx];
+      return fetchFotoBase64(p.fotoKTPId)
+        .then(loadImage)
+        .then(img => { images[idx] = imgToJpeg(img, 1600); })
+        .catch(err => { console.warn('KTP gagal:', p.nama, err); failed.push(p); })
+        .then(() => { doneCount++; updateProgress(); return worker(); });
+    };
+
+    Promise.all([worker(), worker(), worker()])
+      .then(() => {
+        if (job.cancelled) { toast('Download KTP massal dibatalkan', 'warn'); return; }
+
+        $('bulkKtpText').textContent = 'Menyusun PDF...';
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        const okList = [];
+        list.forEach((p, i) => {
+          if (!images[i]) return;
+          if (okList.length) doc.addPage('a4', 'portrait');
+          drawKtpA4Page(doc, images[i], p);
+          okList.push(p);
+        });
+
+        if (!okList.length) { toast('Semua foto KTP gagal diambil', 'error'); return; }
+
+        const parts = ['KTP'];
+        if (state.filter.kampung) parts.push(slugify(state.filter.kampung));
+        if (state.filter.rt) parts.push(state.filter.rt === RT_UMUM ? 'UMUM' : ('RT' + normRT(state.filter.rt)));
+        parts.push(wantPrinted ? 'SudahDicetak' : 'BelumDicetak');
+        parts.push(okList.length + 'data');
+        doc.save(parts.join('_') + '_' + formatTanggalFile(new Date()) + '.pdf');
+
+        if (failed.length) {
+          toast('✅ ' + okList.length + ' KTP ter-download • ' + failed.length + ' gagal: ' +
+            failed.slice(0, 3).map(x => x.nama).join(', ') + (failed.length > 3 ? ', ...' : ''), 'warn');
+        } else {
+          toast('✅ ' + okList.length + ' KTP berhasil di-download (A4)', 'success');
+        }
+
+        if (markAfter) return markBulkPrinted(okList, failed.length);
+      })
+      .catch(err => {
+        console.error('Bulk KTP error:', err);
+        toast('Gagal buat PDF: ' + err.message, 'error');
+      })
+      .then(() => {
+        state.bulkKtp = null;
+        $('modalBulkKtp').classList.remove('show');
+      });
+  }
+
+  function markBulkPrinted(okList, failedCount) {
+    $('bulkKtpText').textContent = 'Menandai ' + okList.length + ' data sebagai sudah dicetak...';
+    const ids = okList.map(x => String(x.id));
+    return new Promise(resolve => {
+      google.script.run
+        .withSuccessHandler(r => {
+          if (r && r.ok) {
+            const idSet = {};
+            ids.forEach(id => { idSet[id] = true; });
+            (state.allData || []).forEach(x => { if (idSet[String(x.id)]) x.dicetak = true; });
+            if (r.version) state.version = r.version;
+            state.dashboardCache = null;
+            toast('🖨️ ' + r.count + ' KTP di-download & ditandai sudah dicetak' + (failedCount ? ' • ' + failedCount + ' gagal diambil' : ''), failedCount ? 'warn' : 'success');
+            if (state.page === 'data') renderData();
+            else if (state.page === 'detail-kampung') renderDetailKampung();
+          } else {
+            toast('PDF sudah ter-download, tapi gagal menandai status cetak: ' + ((r && r.message) || ''), 'error');
+          }
+          resolve();
+        })
+        .withFailureHandler(e => {
+          toast('PDF sudah ter-download, tapi gagal menandai status cetak: ' + e.message, 'error');
+          resolve();
+        })
+        .apiSetPrintBatch(ids, true);
+    });
+  }
+
+  // ============================================================ //
+  // FORM INPUT                                                    //
+  // ============================================================ //
+  function renderInput() {
+    const c = $('appContent');
+    if (!c) return;
+    state.fotoBase64 = null;
+    state.fotoMime = null;
+    state.nikLastChecked = '';
+    state.nikIsDup = false;
+
+    let kampungOpts = '<option value="">-- Pilih Kampung --</option>';
+    KAMPUNG_LIST.forEach(k => kampungOpts += '<option value="' + esc(k) + '">' + esc(k) + '</option>');
+
+    let rtOpts = '<option value="">-- Pilih RT --</option>';
+    RT_LIST.forEach(rt => {
+      const label = rt === RT_UMUM ? 'UMUM (Tanpa RT)' : ('RT ' + rt);
+      rtOpts += '<option value="' + rt + '">' + label + '</option>';
+    });
+
+    c.innerHTML =
+      '<div class="form-card">' +
+        '<div class="section-title" style="margin-top:0">Form Pendukung Baru</div>' +
+        '<div class="form-group">' +
+          '<label class="form-label">Nama Lengkap <span class="req">*</span></label>' +
+          '<input type="text" class="form-input" id="fNama" placeholder="Sesuai KTP" autocomplete="off">' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label class="form-label">NIK <span class="req">*</span></label>' +
+          '<input type="tel" class="form-input" id="fNik" placeholder="16 digit angka" maxlength="16" inputmode="numeric" autocomplete="off">' +
+          '<div class="form-hint">🔒 NIK dicek otomatis — tidak boleh duplikat</div>' +
+          '<div class="nik-preview" id="nikPreview"></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div class="form-group">' +
+            '<label class="form-label">Kampung <span class="req">*</span></label>' +
+            '<select class="form-select" id="fKampung">' + kampungOpts + '</select>' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label class="form-label">RT <span class="req">*</span></label>' +
+            '<select class="form-select" id="fRt">' + rtOpts + '</select>' +
+          '</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label class="form-label">Foto KTP</label>' +
+          '<div class="foto-box" id="fotoBox">' +
+            '<div class="foto-placeholder" id="fotoPlaceholder">' +
+              '<div class="ico">' + ICONS.card + '</div>' +
+              'Ambil foto KTP langsung atau pilih dari galeri' +
+            '</div>' +
+            '<img id="fotoPreview" class="foto-preview" style="display:none" alt="">' +
+            '<div class="foto-btns">' +
+              '<button type="button" class="foto-btn primary" id="btnKamera">' + ICONS.camera + 'Kamera</button>' +
+              '<button type="button" class="foto-btn" id="btnGaleri">' + ICONS.gallery + 'Galeri</button>' +
+            '</div>' +
+            '<button type="button" class="foto-hapus" id="btnHapusFoto" style="display:none">' + ICONS.trash + 'Hapus Foto</button>' +
+          '</div>' +
+        '</div>' +
+        '<button class="btn btn-primary" id="btnSubmit" style="margin-top:8px" type="button">' + ICONS.save + ' Simpan Data</button>' +
+      '</div>';
+
+    const fNik = $('fNik');
+    fNik.addEventListener('input', () => {
+      fNik.value = fNik.value.replace(/\D/g, '').slice(0, 16);
+      handleNikInput(fNik.value, null);
+    });
+
+    $('btnKamera').addEventListener('click', () => $('cameraInput').click());
+    $('btnGaleri').addEventListener('click', () => $('galleryInput').click());
+    $('cameraInput').onchange = handleGalleryFileForCrop;
+    $('galleryInput').onchange = handleGalleryFileForCrop;
+    $('btnHapusFoto').addEventListener('click', clearFoto);
+    $('btnSubmit').addEventListener('click', submitForm);
+  }
+
+  function handleNikInput(nik, excludeId) {
+    const p = $('nikPreview');
+    const fNik = $('fNik');
+    if (!p || !fNik) return;
+    fNik.classList.remove('dup-input', 'ok-input');
+    if (nik.length < 16) {
+      state.nikIsDup = false;
+      state.nikLastChecked = '';
+      if (nik.length > 0) {
+        p.style.display = 'block';
+        p.className = 'nik-preview';
+        p.textContent = 'Ketik ' + (16 - nik.length) + ' digit lagi...';
+      } else p.style.display = 'none';
+      return;
+    }
+    const parsed = parseNIK(nik);
+    if (!parsed.valid) {
+      p.style.display = 'block';
+      p.className = 'nik-preview error';
+      p.textContent = '⚠️ ' + parsed.msg;
+      return;
+    }
+    p.style.display = 'block';
+    p.className = 'nik-preview checking';
+    p.innerHTML = '👤 <b>' + parsed.jenisKelamin + '</b> • 🎂 ' + parsed.tglText + ' • 📅 Usia <b>' + parsed.usia + ' tahun</b><br>🔍 Mengecek NIK...';
+    clearTimeout(state.nikCheckTimer);
+    state.nikCheckTimer = setTimeout(() => { checkNikServer(nik, parsed, excludeId); }, 300);
+  }
+
+  function checkNikServer(nik, parsed, excludeId) {
+    const p = $('nikPreview');
+    const fNik = $('fNik');
+    if (!p || !fNik) return;
+    google.script.run
+      .withSuccessHandler(r => {
+        if (!r.ok) {
+          p.className = 'nik-preview error';
+          p.textContent = '⚠️ ' + (r.message || 'Gagal cek NIK');
+          return;
+        }
+        if (r.tersedia) {
+          state.nikIsDup = false;
+          state.nikLastChecked = nik;
+          fNik.classList.add('ok-input');
+          p.className = 'nik-preview';
+          p.innerHTML = '✅ NIK tersedia • 👤 <b>' + parsed.jenisKelamin + '</b> • 🎂 ' + parsed.tglText + ' • 📅 Usia <b>' + parsed.usia + ' tahun</b>';
+        } else {
+          state.nikIsDup = true;
+          state.nikLastChecked = nik;
+          state.dupData = r.duplikat;
+          fNik.classList.add('dup-input');
+          p.className = 'nik-preview dup';
+          const first = r.duplikat[0];
+          p.innerHTML = '❌ <b>NIK SUDAH TERDAFTAR!</b><br>👤 ' + esc(first.nama) + ' • ' + esc(first.kampung) + ' ' + rtLabel(first.rt);
+        }
+      })
+      .withFailureHandler(e => {
+        p.className = 'nik-preview error';
+        p.textContent = '⚠️ Gagal cek: ' + e.message;
+      })
+      .apiCheckNik({ nik: nik, excludeId: excludeId });
+  }
+
+  function handleGalleryFileForCrop(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { toast('Foto maksimal 8 MB', 'error'); e.target.value = ''; return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      openCropModal(ev.target.result);
+      e.target.value = '';
+    };
+    reader.onerror = () => { toast('Gagal membaca file foto', 'error'); e.target.value = ''; };
+    reader.readAsDataURL(file);
+  }
+
+  function showFotoPreview(base64) {
+    $('fotoPreview').src = base64;
+    $('fotoPreview').style.display = 'block';
+    $('fotoPlaceholder').style.display = 'none';
+    $('fotoBox').classList.add('has-foto');
+    $('btnHapusFoto').style.display = 'flex';
+  }
+
+  function clearFoto() {
+    state.fotoBase64 = null;
+    state.fotoMime = null;
+    $('fotoPreview').style.display = 'none';
+    $('fotoPreview').src = '';
+    $('fotoPlaceholder').style.display = 'block';
+    $('fotoBox').classList.remove('has-foto');
+    $('btnHapusFoto').style.display = 'none';
+  }
+
+  // ============================================================ //
+  // ⭐ CROP FOTO KTP (Cropper.js)                                  //
+  // Catatan: kamera live custom (getUserMedia) TIDAK BISA dipakai  //
+  // di web app Google Apps Script karena iframe pembungkus dari    //
+  // script.google.com tidak mendelegasikan izin "camera" pada      //
+  // Permissions-Policy-nya (di luar kendali kode aplikasi ini).    //
+  // Maka tombol Kamera memakai input file native (capture kamera   //
+  // OS) lalu hasilnya tetap masuk ke modal crop di bawah ini,      //
+  // supaya pengguna tetap bisa memangkas persis ke area KTP.       //
+  //                                                                //
+  // Catatan lain: fitur baca-otomatis NIK/Nama via OCR (Tesseract) //
+  // sempat dicoba tapi DIHAPUS setelah diuji dengan foto KTP asli  //
+  // — akurasinya tidak layak pakai (banyak salah baca digit NIK,   //
+  // baris Nama sering tidak terbaca sama sekali karena pola        //
+  // pengaman/background KTP mengganggu OCR). NIK & Nama diisi      //
+  // manual seperti semula. Fitur putar foto juga dihapus atas      //
+  // permintaan — editor foto sekarang hanya untuk memangkas/crop.  //
+  // ============================================================ //
+  const KTP_RATIO = 85.6 / 53.98;
+  let cropperInstance = null;
+  let cropIsFreeRatio = false;
+
+  function openCropModal(dataUrl) {
+    const modal = $('modalCropFoto');
+    const img = $('cropImgEl');
+    if (cropperInstance) { cropperInstance.destroy(); cropperInstance = null; }
+    cropIsFreeRatio = false;
+    $('cropRatioToggle').classList.remove('active');
+    img.onload = () => {
+      cropperInstance = new Cropper(img, {
+        viewMode: 1,
+        dragMode: 'move',
+        aspectRatio: KTP_RATIO,
+        autoCropArea: 0.98,
+        background: false,
+        responsive: true,
+        guides: true,
+        center: true,
+        highlight: false,
+        cropBoxMovable: true,
+        cropBoxResizable: true,
+        toggleDragModeOnDblclick: false
+      });
+    };
+    img.src = dataUrl;
+    modal.classList.add('show');
+    updateFabVisibility();
+  }
+
+  function closeCropModal() {
+    $('modalCropFoto').classList.remove('show');
+    updateFabVisibility();
+    if (cropperInstance) { cropperInstance.destroy(); cropperInstance = null; }
+    $('cropImgEl').src = '';
+  }
+
+  function finalizeFotoKTP(dataUrl) {
+    state.fotoBase64 = dataUrl;
+    state.fotoMime = 'image/jpeg';
+    showFotoPreview(dataUrl);
+  }
+
+  function submitForm() {
+    const nama = $('fNama').value.trim();
+    const nik = $('fNik').value.trim();
+    const kampung = $('fKampung').value;
+    const rt = normRT($('fRt').value);
+    if (!nama) { toast('Nama wajib diisi', 'error'); $('fNama').focus(); return; }
+    if (!/^\d{16}$/.test(nik)) { toast('NIK harus 16 digit', 'error'); $('fNik').focus(); return; }
+    if (!kampung) { toast('Pilih kampung', 'error'); return; }
+    if (!rt || RT_LIST.indexOf(rt) === -1) { toast('Pilih RT', 'error'); return; }
+    if (state.nikIsDup && state.dupData && state.nikLastChecked === nik) {
+      showDupWarning(state.dupData);
+      return;
+    }
+
+    const btn = $('btnSubmit');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Memverifikasi NIK...';
+
+    google.script.run
+      .withSuccessHandler(checkR => {
+        if (checkR.ok && !checkR.tersedia) {
+          btn.disabled = false;
+          btn.innerHTML = ICONS.save + ' Simpan Data';
+          showDupWarning(checkR.duplikat);
+          state.nikIsDup = true;
+          state.dupData = checkR.duplikat;
+          const p = $('nikPreview');
+          const fNik = $('fNik');
+          if (p) { p.className = 'nik-preview dup'; p.innerHTML = '❌ <b>NIK SUDAH TERDAFTAR!</b><br>👤 ' + esc(checkR.duplikat[0].nama); }
+          if (fNik) fNik.classList.add('dup-input');
+          return;
+        }
+        btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Menyimpan...';
+        const payload = { nama, nik, kampung, rt, fotoBase64: state.fotoBase64, fotoMime: state.fotoMime };
+        google.script.run
+          .withSuccessHandler(r => {
+            btn.disabled = false;
+            btn.innerHTML = ICONS.save + ' Simpan Data';
+            if (r.ok) {
+              toast('✅ ' + r.message, 'success');
+              if (r.version) state.version = r.version;
+              $('fNama').value = '';
+              $('fNik').value = '';
+              $('fKampung').value = '';
+              $('fRt').value = '';
+              $('nikPreview').style.display = 'none';
+              $('fNik').classList.remove('dup-input', 'ok-input');
+              state.nikIsDup = false;
+              state.nikLastChecked = '';
+              clearFoto();
+              state.allData = null;
+              state.dashboardCache = null;
+              state.prevIds = {};
+              state.currentPage = 1;
+              fetchAndReplace(false, () => {
+                state.page = 'data';
+                state.pageToken++;
+                document.querySelectorAll('[data-nav]').forEach(el => {
+                  el.classList.toggle('active', el.getAttribute('data-nav') === 'data');
+                });
+                updateFabVisibility();
+                renderData();
+              });
+            } else {
+              if (r.duplikat && r.duplikat.length) {
+                showDupWarning(r.duplikat);
+                state.nikIsDup = true;
+                state.dupData = r.duplikat;
+              } else {
+                toast('❌ ' + r.message, 'error');
+              }
+            }
+          })
+          .withFailureHandler(e => {
+            btn.disabled = false;
+            btn.innerHTML = ICONS.save + ' Simpan Data';
+            toast('Gagal: ' + e.message, 'error');
+          })
+          .apiAdd(payload);
+      })
+      .withFailureHandler(e => {
+        btn.disabled = false;
+        btn.innerHTML = ICONS.save + ' Simpan Data';
+        toast('Gagal cek NIK: ' + e.message, 'error');
+      })
+      .apiCheckNik({ nik: nik, excludeId: null });
+  }
+
+  function showDupWarning(duplikat) {
+    const list = $('dupList');
+    let html = '';
+    duplikat.forEach(d => {
+      const initials = (d.nama || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+      html +=
+        '<div class="dup-list-item">' +
+          '<div class="dup-li-avatar">' + esc(initials) + '</div>' +
+          '<div class="dup-li-info">' +
+            '<div class="dup-li-name">' + esc(d.nama) + '</div>' +
+            '<div class="dup-li-meta">' + esc(d.kampung) + ' • ' + rtLabel(d.rt) + '</div>' +
+          '</div>' +
+        '</div>';
+    });
+    list.innerHTML = html;
+    $('modalDupWarning').classList.add('show');
+  }
+
+  $('dupOkBtn').addEventListener('click', () => {
+    $('modalDupWarning').classList.remove('show');
+    if ($('fNik')) $('fNik').focus();
+  });
+
+  // ============================================================ //
+  // HALAMAN DATA                                                  //
+  // ============================================================ //
+  function renderData() {
+    const c = $('appContent');
+    if (!c) return;
+
+    const allList = state.allData || [];
+
+    let baseList = allList;
+    if (state.filter.kampung) {
+      baseList = baseList.filter(x => String(x.kampung || '').trim() === String(state.filter.kampung).trim());
+    }
+    if (state.filter.rt) {
+      const targetRT = normRT(state.filter.rt);
+      baseList = baseList.filter(x => normRT(x.rt) === targetRT);
+    }
+
+    const countAll = baseList.length;
+    const countVerified = baseList.filter(x => x.verified === true).length;
+    const countUnverified = countAll - countVerified;
+    const countDicetak = baseList.filter(x => x.dicetak === true).length;
+    const countBelumCetak = countAll - countDicetak;
+
+    let kampungOpts = '<option value="">Semua Kampung</option>';
+    KAMPUNG_LIST.forEach(k => {
+      const sel = (state.filter.kampung === k) ? ' selected' : '';
+      kampungOpts += '<option value="' + esc(k) + '"' + sel + '>' + esc(k) + '</option>';
+    });
+
+    let rtOpts = '<option value="">Semua RT</option>';
+    RT_LIST.forEach(rt => {
+      const sel = (state.filter.rt && normRT(state.filter.rt) === normRT(rt)) ? ' selected' : '';
+      const label = rt === RT_UMUM ? 'UMUM' : ('RT ' + rt);
+      rtOpts += '<option value="' + rt + '"' + sel + '>' + label + '</option>';
+    });
+
+    // ⭐ Filter status verifikasi & cetak disederhanakan jadi dropdown (senada dengan Kampung/RT)
+    let verifiedOpts = '<option value="">Semua Status Suara (' + countAll + ')</option>';
+    verifiedOpts += '<option value="true"' + (state.filter.verified === 'true' ? ' selected' : '') + '>✅ Suara PASTI (' + countVerified + ')</option>';
+    verifiedOpts += '<option value="false"' + (state.filter.verified === 'false' ? ' selected' : '') + '>⏳ Belum Pasti (' + countUnverified + ')</option>';
+
+    let printOpts = '<option value="">Semua Status Cetak (' + countAll + ')</option>';
+    printOpts += '<option value="true"' + (state.filter.dicetak === 'true' ? ' selected' : '') + '>🖨️ Sudah Dicetak (' + countDicetak + ')</option>';
+    printOpts += '<option value="false"' + (state.filter.dicetak === 'false' ? ' selected' : '') + '>📄 Belum Dicetak (' + countBelumCetak + ')</option>';
+
+    c.innerHTML =
+      '<div class="filter-bar">' +
+        '<div class="filter-search">' + ICONS.search +
+          '<input type="text" id="fSearch" placeholder="Cari nama atau NIK..." value="' + esc(state.filter.q) + '" autocomplete="off">' +
+        '</div>' +
+        '<div class="filter-row">' +
+          '<select id="fFilterKampung">' + kampungOpts + '</select>' +
+          '<select id="fFilterRt">' + rtOpts + '</select>' +
+          '<select id="fFilterVerified">' + verifiedOpts + '</select>' +
+          '<select id="fFilterDicetak">' + printOpts + '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="data-actions">' +
+        (!isAdmin() ? '' :
+        '<button class="btn-download btn-sel-mode' + (state.sel.on ? ' active' : '') + '" id="btnSelMode" type="button">' +
+          (state.sel.on ? ICONS.close + ' Keluar Ceklist' : ICONS.check + ' Ceklist Cetak') +
+        '</button>' +
+        '<button class="btn-download btn-bulk-ktp" id="btnBulkKtp" type="button">' +
+          ICONS.download + ' Download KTP' +
+        '</button>') +
+      '</div>' +
+      '<div class="grid-info" id="gridInfo"></div>' +
+      '<div id="dataGridWrap"></div>' +
+      '<div id="paginationWrap"></div>';
+
+    $('fSearch').addEventListener('input', debounce(e => {
+      state.filter.q = e.target.value.trim();
+      state.currentPage = 1;
+      renderFilteredGrid();
+    }, 150));
+
+    $('fFilterKampung').addEventListener('change', e => {
+      state.filter.kampung = e.target.value;
+      state.currentPage = 1;
+      renderData();
+    });
+
+    $('fFilterRt').addEventListener('change', e => {
+      state.filter.rt = e.target.value;
+      state.currentPage = 1;
+      renderData();
+    });
+
+    $('fFilterVerified').addEventListener('change', e => {
+      state.filter.verified = e.target.value;
+      state.currentPage = 1;
+      renderData();
+    });
+
+    $('fFilterDicetak').addEventListener('change', e => {
+      state.filter.dicetak = e.target.value;
+      state.currentPage = 1;
+      renderData();
+    });
+
+    if (isAdmin()) {
+      $('btnBulkKtp').addEventListener('click', () => {
+        if (!state.allData) { toast('Data masih dimuat, tunggu sebentar', 'warn'); return; }
+        window.__openBulkKtp();
+      });
+
+      $('btnSelMode').addEventListener('click', () => {
+        if (!state.allData) { toast('Data masih dimuat, tunggu sebentar', 'warn'); return; }
+        if (state.sel.on) exitSelMode(true);
+        else enterSelMode();
+      });
+    }
+
+    if (state.allData) {
+      renderFilteredGrid();
+      syncData(true);
+      return;
+    }
+
+    showGridSkeleton();
+    fetchAndReplace(false);
+  }
+
+  function showGridSkeleton() {
+    const wrap = $('dataGridWrap');
+    if (!wrap) return;
+    const info = $('gridInfo');
+    if (info) info.innerHTML = '<span>Memuat data...</span>';
+    let html = '<div class="data-grid">';
+    for (let i = 0; i < 6; i++) {
+      html +=
+        '<div class="person-card skeleton-card">' +
+          '<div class="skeleton skeleton-line" style="width:60%;height:16px;margin-bottom:12px"></div>' +
+          '<div class="skeleton skeleton-block" style="height:120px;margin-bottom:10px"></div>' +
+          '<div class="skeleton skeleton-line" style="width:80%;height:12px;margin-bottom:6px"></div>' +
+          '<div class="skeleton skeleton-line" style="width:70%;height:12px;margin-bottom:6px"></div>' +
+          '<div class="skeleton skeleton-line" style="width:50%;height:12px"></div>' +
+        '</div>';
+    }
+    html += '</div>';
+    wrap.innerHTML = html;
+  }
+
+  // Semua filter halaman Data (kampung, RT, pencarian, status suara, status cetak)
+  function getFilteredData() {
+    let filtered = state.allData || [];
+    if (state.filter.kampung) filtered = filtered.filter(x => String(x.kampung || '').trim() === String(state.filter.kampung).trim());
+    if (state.filter.rt) {
+      const targetRT = normRT(state.filter.rt);
+      filtered = filtered.filter(x => normRT(x.rt) === targetRT);
+    }
+    if (state.filter.q) {
+      const q = state.filter.q.toLowerCase();
+      filtered = filtered.filter(x =>
+        (x.nama || '').toLowerCase().includes(q) || (x.nik || '').includes(q)
+      );
+    }
+    if (state.filter.verified === 'true') filtered = filtered.filter(x => x.verified === true);
+    else if (state.filter.verified === 'false') filtered = filtered.filter(x => x.verified !== true);
+    if (state.filter.dicetak === 'true') filtered = filtered.filter(x => x.dicetak === true);
+    else if (state.filter.dicetak === 'false') filtered = filtered.filter(x => x.dicetak !== true);
+    return filtered;
+  }
+
+  function renderFilteredGrid(animate) {
+    const wrap = $('dataGridWrap');
+    const info = $('gridInfo');
+    const pag = $('paginationWrap');
+    if (!wrap) return;
+
+    const filtered = getFilteredData();
+    const selOn = state.sel.on;
+    state.sel.pageIds = [];
+
+    const totalFiltered = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(totalFiltered / PER_PAGE));
+    if (state.currentPage > totalPages) state.currentPage = totalPages;
+    if (state.currentPage < 1) state.currentPage = 1;
+    const startIdx = (state.currentPage - 1) * PER_PAGE;
+    const endIdx = Math.min(startIdx + PER_PAGE, totalFiltered);
+    const pageItems = filtered.slice(startIdx, endIdx);
+
+    if (info) {
+      const totalAll = (state.allData || []).length;
+      let infoText = 'Menampilkan <b>' + (totalFiltered === 0 ? 0 : startIdx + 1) + '–' + endIdx + '</b> dari <b>' + totalFiltered + '</b>';
+      if (totalFiltered !== totalAll) infoText += ' (total ' + totalAll + ' data)';
+      const parts = [];
+      if (state.filter.kampung) parts.push(state.filter.kampung);
+      if (state.filter.rt) parts.push(state.filter.rt === RT_UMUM ? 'UMUM' : ('RT ' + normRT(state.filter.rt)));
+      if (state.filter.verified === 'true') parts.push('✅ Pasti');
+      else if (state.filter.verified === 'false') parts.push('⏳ Belum');
+      if (state.filter.dicetak === 'true') parts.push('🖨️ Sudah Cetak');
+      else if (state.filter.dicetak === 'false') parts.push('🖨️ Belum Cetak');
+      if (parts.length) infoText += ' • filter: ' + parts.join(', ');
+      info.innerHTML = infoText + ' <span class="live-tag"><span class="sync-dot"></span>Realtime</span>';
+    }
+
+    if (totalFiltered === 0) {
+      wrap.innerHTML = emptyState('📭', 'Tidak ada data', 'Coba ubah filter atau kata kunci pencarian');
+      if (pag) pag.innerHTML = '';
+      renderSelBar();
+      return;
+    }
+
+    const prevIds = animate ? state.prevIds : {};
+    const newIds = {};
+
+    let html = '<div class="data-grid' + (selOn ? ' select-mode' : '') + '">';
+    pageItems.forEach(p => {
+      newIds[p.id] = true;
+      state.sel.pageIds.push(String(p.id));
+      const isSel = selOn && !!state.sel.ids[p.id];
+      const isNew = animate && !prevIds[p.id];
+      const isP = p.jenisKelamin === 'Perempuan';
+      const isVerified = p.verified === true;
+      const initials = (p.nama || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+      const fotoUrl = p.fotoThumb || p.fotoKTP || '';
+      const cardClass = 'person-card ' + (isVerified ? 'verified-card' : 'unverified-card') + (isNew ? ' is-new' : '') + (isSel ? ' selected' : '');
+
+      const hasFotoKTP = !!(p.fotoKTPId && String(p.fotoKTPId).trim());
+      const isPrinted = p.dicetak === true;
+
+      html +=
+        '<div class="' + cardClass + '" data-open-detail="' + esc(p.id) + '">' +
+          (selOn ? '<div class="sel-check" aria-hidden="true">' + ICONS.check + '</div>' : '') +
+          (isAdmin() ?
+          '<div class="card-corner-actions">' +
+            '<button class="pc-print-corner' + (isPrinted ? ' printed' : '') + '" data-action="toggle-print" data-id="' + esc(p.id) + '" data-dicetak="' + (isPrinted ? '1' : '0') + '" title="' + (isPrinted ? 'Tandai belum dicetak' : 'Tandai sudah dicetak') + '" type="button">' + ICONS.check + '</button>' +
+            '<button class="pc-del-corner" data-action="del" data-id="' + esc(p.id) + '" data-nama="' + esc(p.nama) + '" title="Hapus data" type="button">' + ICONS.trash + '</button>' +
+          '</div>' : '') +
+          '<div class="person-head">' +
+            '<div class="person-avatar' + (isP ? ' p' : '') + '">' + esc(initials) +
+              (isVerified ? '<div class="verified-mark">' + ICONS.check + '</div>' : '') +
+            '</div>' +
+            '<div class="person-info">' +
+              '<div class="person-name" title="' + esc(p.nama) + '">' + esc(p.nama) + '</div>' +
+              '<div class="person-tags-row">' +
+                '<span class="person-tag' + (isP ? ' p' : '') + '">' + esc(p.jenisKelamin) + '</span>' +
+                '<span class="person-verify-tag ' + (isVerified ? 'verified' : 'unverified') + '">' +
+                  (isVerified ? ICONS.shield + ' SUARA PASTI' : ICONS.clock + ' BELUM PASTI') +
+                '</span>' +
+                '<span class="person-print-tag ' + (isPrinted ? 'printed' : 'unprinted') + '">' +
+                  ICONS.printer + (isPrinted ? ' SUDAH DICETAK' : ' BELUM DICETAK') +
+                '</span>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          (fotoUrl
+            ? '<img class="person-foto" data-src="' + esc(fotoUrl) + '" data-full="' + esc(p.fotoKTP || '') + '" alt="KTP ' + esc(p.nama) + '">'
+            : ''
+          ) +
+          '<div class="person-row"><b>NIK</b><span>' + esc(p.nik) + '</span></div>' +
+          '<div class="person-row"><b>Usia</b><span>' + (p.usia || '-') + ' tahun</span></div>' +
+          '<div class="person-row"><b>Kampung</b><span>' + esc(p.kampung) + '</span></div>' +
+          '<div class="person-row"><b>RT</b><span>' + rtLabel(p.rt) + '</span></div>' +
+          (isAdmin() ?
+          '<div class="person-actions">' +
+            (isVerified
+              ? '<button class="pc-unverify" data-action="unverify" data-id="' + esc(p.id) + '" title="Batalkan verifikasi" type="button">' + ICONS.clock + ' Batal</button>'
+              : '<button class="pc-verify" data-action="verify" data-id="' + esc(p.id) + '" title="Tandai sudah TTD" type="button">' + ICONS.shield + ' Verifikasi</button>'
+            ) +
+            '<button class="pc-edit" data-action="edit" data-id="' + esc(p.id) + '" type="button">' + ICONS.edit + ' Edit</button>' +
+            '<button class="pc-download" data-action="download-ktp" data-id="' + esc(p.id) + '" type="button"' + (hasFotoKTP ? '' : ' disabled title="Belum ada foto KTP"') + '>' + ICONS.download + ' KTP</button>' +
+          '</div>' : '') +
+        '</div>';
+    });
+    html += '</div>';
+    wrap.innerHTML = html;
+
+    state.prevIds = newIds;
+    bindGridEvents(wrap);
+    setupLazyImages(wrap);
+
+    if (pag) renderPagination(pag, totalFiltered, totalPages);
+    renderSelBar();
+  }
+
+  // ⭐ Disederhanakan jadi satu baris (‹ 1 2 3…16 ›). Tombol Awal/Akhir dan
+  // kotak "Ke: ... Go" dihapus — fitur pencarian sudah cukup untuk navigasi cepat.
+  function renderPagination(container, totalFiltered, totalPages) {
+    if (totalPages <= 1) { container.innerHTML = ''; return; }
+    const cur = state.currentPage;
+    const pages = buildPageNumbers(cur, totalPages);
+    let btns = '';
+    btns += '<button class="page-btn nav-btn" data-page="' + (cur - 1) + '" ' + (cur === 1 ? 'disabled' : '') + ' title="Sebelumnya" type="button">' + ICONS.prev + '</button>';
+    pages.forEach(p => {
+      if (p === '...') btns += '<span class="page-ellipsis">…</span>';
+      else btns += '<button class="page-btn' + (p === cur ? ' active' : '') + '" data-page="' + p + '" type="button">' + p + '</button>';
+    });
+    btns += '<button class="page-btn nav-btn" data-page="' + (cur + 1) + '" ' + (cur === totalPages ? 'disabled' : '') + ' title="Berikutnya" type="button">' + ICONS.next + '</button>';
+
+    container.innerHTML =
+      '<div class="pagination-wrap">' +
+        '<div class="pagination-info">Halaman <b>' + cur + '</b> dari <b>' + totalPages + '</b></div>' +
+        '<div class="pagination-controls">' + btns + '</div>' +
+      '</div>';
+
+    container.querySelectorAll('.page-btn[data-page]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = parseInt(btn.getAttribute('data-page'), 10);
+        if (!target || target < 1 || target > totalPages) return;
+        if (target === state.currentPage) return;
+        gotoPage(target);
+      });
+    });
+  }
+
+  function gotoPage(p) {
+    state.currentPage = p;
+    renderFilteredGrid(false);
+    const wrap = $('dataGridWrap');
+    if (wrap) {
+      const y = wrap.getBoundingClientRect().top + window.pageYOffset - 100;
+      window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+    }
+  }
+
+  function buildPageNumbers(current, total) {
+    const delta = 2;
+    const range = [];
+    const rangeWithDots = [];
+    let last;
+    for (let i = 1; i <= total; i++) {
+      if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) range.push(i);
+    }
+    range.forEach(i => {
+      if (last) {
+        if (i - last === 2) rangeWithDots.push(last + 1);
+        else if (i - last > 2) rangeWithDots.push('...');
+      }
+      rangeWithDots.push(i);
+      last = i;
+    });
+    return rangeWithDots;
+  }
+
+  function bindGridEvents(container) {
+    // ⭐ FIX: #dataGridWrap tidak dibuat ulang saat ganti halaman/pencarian/sinkron,
+    // jadi listener cukup dipasang SEKALI. Dulu terpasang berulang sehingga satu
+    // klik diproses berkali-kali (fatal untuk ceklist: centang langsung terlepas lagi).
+    if (container._gridBound) return;
+    container._gridBound = true;
+    container.addEventListener('click', e => {
+      // Mode ceklist massal: klik di mana pun pada kartu = pilih / batal pilih
+      if (state.sel.on) {
+        const selCard = e.target.closest('[data-open-detail]');
+        if (selCard) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleSelCard(selCard.getAttribute('data-open-detail'), selCard);
+        }
+        return;
+      }
+
+      const btn = e.target.closest('[data-action]');
+      if (btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const action = btn.getAttribute('data-action');
+        const id = btn.getAttribute('data-id');
+        if (!isAdmin() && action !== 'download-ktp') return; // role user: tombol tulis tidak ada & ditolak
+        if (action === 'edit') window.__editData(id);
+        else if (action === 'del') window.__deleteData(id, btn.getAttribute('data-nama'));
+        else if (action === 'verify') window.__startVerify(id);
+        else if (action === 'unverify') window.__unverifyData(id);
+        else if (action === 'download-ktp' && isAdmin()) window.__downloadKtpA4(id, btn);
+        else if (action === 'toggle-print') window.__togglePrint(id, btn);
+        return;
+      }
+
+      if (e.target.closest('img.person-foto')) return;
+
+      const card = e.target.closest('[data-open-detail]');
+      if (card) {
+        const id = card.getAttribute('data-open-detail');
+        if (id) window.__openDetailWarga(id);
+      }
+    });
+  }
+
+  // ============================================================ //
+  // ⭐ CEKLIST MASSAL STATUS CETAK                                //
+  // ============================================================ //
+  // Pilih banyak data (lintas halaman & filter), lalu tandai Sudah /
+  // Belum Dicetak sekaligus. Tidak bergantung pada foto KTP — data
+  // tanpa foto juga bisa ditandai. Server: apiSetPrintBatch (1x tulis).
+  function selCount() { return Object.keys(state.sel.ids).length; }
+
+  function enterSelMode() {
+    state.sel.on = true;
+    state.sel.ids = {};
+    document.body.classList.add('sel-mode');
+    renderData();
+    toast('Mode ceklist aktif: ketuk kartu untuk memilih', 'success');
+  }
+
+  function exitSelMode(rerender) {
+    const wasOn = state.sel.on;
+    state.sel.on = false;
+    state.sel.ids = {};
+    state.sel.pageIds = [];
+    document.body.classList.remove('sel-mode');
+    const bar = $('selBar');
+    if (bar) bar.innerHTML = '';
+    if (rerender && wasOn && state.page === 'data') renderData();
+  }
+
+  function toggleSelCard(id, cardEl) {
+    if (!id || state.sel.busy) return;
+    if (state.sel.ids[id]) delete state.sel.ids[id];
+    else state.sel.ids[id] = true;
+    // Update DOM langsung (tanpa render ulang grid) supaya cepat & tidak berkedip
+    if (cardEl) cardEl.classList.toggle('selected', !!state.sel.ids[id]);
+    renderSelBar();
+  }
+
+  function setSelMany(ids, on) {
+    ids.forEach(id => { if (on) state.sel.ids[id] = true; else delete state.sel.ids[id]; });
+    document.querySelectorAll('#dataGridWrap [data-open-detail]').forEach(card => {
+      card.classList.toggle('selected', !!state.sel.ids[card.getAttribute('data-open-detail')]);
+    });
+    renderSelBar();
+  }
+
+  function renderSelBar() {
+    // Bar ditempel ke <body>, bukan ke #appContent: .app-content punya animasi
+    // transform yang membuat position:fixed di dalamnya ikut menempel ke konten.
+    let bar = $('selBar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'selBar';
+      document.body.appendChild(bar);
+    }
+    if (!state.sel.on || state.page !== 'data') { bar.innerHTML = ''; return; }
+
+    // Buang id yang sudah tidak ada (mis. dihapus orang lain saat sinkron)
+    const byId = {};
+    (state.allData || []).forEach(p => { byId[p.id] = p; });
+    Object.keys(state.sel.ids).forEach(id => { if (!byId[id]) delete state.sel.ids[id]; });
+
+    const filtered = getFilteredData();
+    const filteredIds = filtered.map(p => String(p.id));
+    const inFilter = filteredIds.filter(id => state.sel.ids[id]).length;
+    const n = selCount();
+    const hidden = n - inFilter;
+    const pageIds = state.sel.pageIds || [];
+    const pageAll = pageIds.length > 0 && pageIds.every(id => state.sel.ids[id]);
+    const allFilter = filteredIds.length > 0 && inFilter === filteredIds.length;
+    const belumIds = filtered.filter(p => p.dicetak !== true).map(p => String(p.id));
+    const sel = Object.keys(state.sel.ids).map(id => byId[id]);
+    const nBelum = sel.filter(p => p.dicetak !== true).length;
+    const nSudah = n - nBelum;
+    const nTanpaFoto = sel.filter(p => !(p.fotoKTPId && String(p.fotoKTPId).trim())).length;
+    const busy = state.sel.busy;
+
+    bar.innerHTML =
+      '<div class="sel-bar">' +
+        '<div class="sel-bar-top">' +
+          '<div class="sel-count">' +
+            '<b>' + n + '</b> dipilih' +
+            (n ? '<span>' + nBelum + ' belum · ' + nSudah + ' sudah dicetak' + (nTanpaFoto ? ' · ' + nTanpaFoto + ' tanpa foto KTP' : '') + '</span>' : '<span>Ketuk kartu untuk memilih</span>') +
+            (hidden > 0 ? '<span class="sel-hidden">' + hidden + ' terpilih di luar filter/pencarian saat ini</span>' : '') +
+          '</div>' +
+          '<button class="sel-done" id="selDone" type="button"' + (busy ? ' disabled' : '') + '>Selesai</button>' +
+        '</div>' +
+        '<div class="sel-quick">' +
+          '<button type="button" id="selPage"' + (pageIds.length && !busy ? '' : ' disabled') + '>' + (pageAll ? 'Batal pilih halaman ini' : 'Pilih halaman ini (' + pageIds.length + ')') + '</button>' +
+          '<button type="button" id="selAll"' + (filteredIds.length && !busy ? '' : ' disabled') + '>' + (allFilter ? 'Batal pilih semua hasil filter' : 'Pilih semua hasil filter (' + filteredIds.length + ')') + '</button>' +
+          '<button type="button" id="selBelum"' + (belumIds.length && !busy ? '' : ' disabled') + '>Pilih yang belum dicetak (' + belumIds.length + ')</button>' +
+          '<button type="button" id="selClear"' + (n && !busy ? '' : ' disabled') + '>Kosongkan</button>' +
+        '</div>' +
+        '<div class="sel-actions">' +
+          '<button type="button" class="sel-mark-on" id="selMarkOn"' + (nBelum && !busy ? '' : ' disabled') + '>' +
+            (busy === 'on' ? '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Menyimpan...' : ICONS.printer + ' Tandai Sudah Dicetak' + (nBelum ? ' (' + nBelum + ')' : '')) +
+          '</button>' +
+          '<button type="button" class="sel-mark-off" id="selMarkOff"' + (nSudah && !busy ? '' : ' disabled') + '>' +
+            (busy === 'off' ? 'Menyimpan...' : 'Tandai Belum Dicetak' + (nSudah ? ' (' + nSudah + ')' : '')) +
+          '</button>' +
+        '</div>' +
+      '</div>';
+
+    const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+    on('selDone', () => exitSelMode(true));
+    on('selPage', () => setSelMany(pageIds, !pageAll));
+    on('selAll', () => setSelMany(filteredIds, !allFilter));
+    on('selBelum', () => setSelMany(belumIds, true));
+    on('selClear', () => setSelMany(Object.keys(state.sel.ids), false));
+    on('selMarkOn', () => confirmSelPrint(true));
+    on('selMarkOff', () => confirmSelPrint(false));
+  }
+
+  function confirmSelPrint(dicetak) {
+    const byId = {};
+    (state.allData || []).forEach(p => { byId[p.id] = p; });
+    const sel = Object.keys(state.sel.ids).map(id => byId[id]).filter(Boolean);
+    // Hanya kirim yang statusnya memang berubah
+    const target = sel.filter(p => (p.dicetak === true) !== dicetak);
+    if (!target.length) { toast('Tidak ada data yang perlu diubah', 'warn'); return; }
+    const lewati = sel.length - target.length;
+    const tanpaFoto = target.filter(p => !(p.fotoKTPId && String(p.fotoKTPId).trim())).length;
+    const label = dicetak ? 'SUDAH DICETAK' : 'BELUM DICETAK';
+
+    const contoh = target.slice(0, 5).map(p => esc(p.nama)).join(', ') + (target.length > 5 ? ', dan ' + (target.length - 5) + ' lainnya' : '');
+    $('confirmTitle').textContent = 'Tandai ' + (dicetak ? 'Sudah' : 'Belum') + ' Dicetak?';
+    $('confirmMsg').innerHTML =
+      '<b>' + target.length + ' data</b> akan ditandai <b>' + label + '</b>.<br>' +
+      '<span style="font-size:12px">' + contoh + '</span>' +
+      (dicetak && tanpaFoto ? '<br><br>Termasuk <b>' + tanpaFoto + ' data tanpa foto KTP</b>.' : '') +
+      (lewati ? '<br>' + lewati + ' data terpilih lainnya sudah berstatus ' + label.toLowerCase() + ', dilewati.' : '');
+    $('confirmYes').textContent = 'Ya, Tandai ' + target.length;
+    state.confirmCb = () => applySelPrint(target.map(p => String(p.id)), dicetak);
+    $('modalConfirm').classList.add('show');
+  }
+
+  function applySelPrint(ids, dicetak) {
+    if (state.sel.busy) return;
+    state.sel.busy = dicetak ? 'on' : 'off';
+    closeConfirm();
+    renderSelBar();
+
+    const done = () => { state.sel.busy = false; renderSelBar(); };
+    google.script.run
+      .withSuccessHandler(r => {
+        if (!r || !r.ok) { toast('❌ ' + ((r && r.message) || 'Gagal menyimpan'), 'error'); done(); return; }
+        const set = {};
+        ids.forEach(id => { set[id] = true; });
+        (state.allData || []).forEach(p => { if (set[p.id]) p.dicetak = dicetak; });
+        if (r.version) state.version = r.version;
+        state.dashboardCache = null;
+        toast('🖨️ ' + r.count + ' data ditandai ' + (dicetak ? 'sudah' : 'belum') + ' dicetak', 'success');
+        state.sel.busy = false;
+        exitSelMode(false);
+        if (state.page === 'data') renderData();
+      })
+      .withFailureHandler(e => {
+        toast('Gagal: ' + e.message, 'error');
+        done();
+      })
+      .apiSetPrintBatch(ids, dicetak);
+  }
+
+  // ⭐ MODAL DETAIL WARGA
+  window.__openDetailWarga = function(id) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) { toast('Data tidak ditemukan', 'error'); return; }
+
+    state.detailWargaId = id;
+    renderModalDetailWarga(p);
+    $('modalDetailWarga').classList.add('show');
+  };
+
+  function renderModalDetailWarga(p) {
+    const content = $('modalDetailWargaContent');
+    if (!content) return;
+
+    const isVerified = p.verified === true;
+    const isPrinted = p.dicetak === true;
+    const isP = p.jenisKelamin === 'Perempuan';
+    const initials = (p.nama || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+    const fotoKTP = p.fotoKTP || '';
+    const fotoTTD = p.fotoTTD || '';
+
+    content.innerHTML =
+      '<div class="warga-detail-head">' +
+        '<div class="warga-avatar' + (isP ? ' p' : '') + '">' + esc(initials) + '</div>' +
+        '<div class="warga-head-info">' +
+          '<div class="warga-head-name">' + esc(p.nama) + '</div>' +
+          '<span class="person-verify-tag ' + (isVerified ? 'verified' : 'unverified') + '" style="margin-top:6px">' +
+            (isVerified ? ICONS.shield + ' SUARA PASTI' : ICONS.clock + ' BELUM PASTI') +
+          '</span>' +
+          '<span class="person-print-tag ' + (isPrinted ? 'printed' : 'unprinted') + '" style="margin-top:6px">' +
+            ICONS.printer + (isPrinted ? ' SUDAH DICETAK' : ' BELUM DICETAK') +
+          '</span>' +
+        '</div>' +
+        '<button class="modal-close" id="btnCloseDetailWarga" type="button" title="Tutup">' + ICONS.close + '</button>' +
+      '</div>' +
+
+      '<div class="warga-section">' +
+        '<div class="warga-section-title">' + ICONS.card + ' Foto KTP</div>' +
+        (fotoKTP
+          ? '<img class="warga-foto" src="' + esc(fotoKTP) + '" alt="Foto KTP ' + esc(p.nama) + '" onclick="window.__showFoto(\'' + esc(fotoKTP) + '\')">'
+          : '<div class="warga-foto-empty">📷 Belum ada foto KTP</div>'
+        ) +
+      '</div>' +
+
+      '<div class="warga-section">' +
+        '<div class="warga-section-title">' + ICONS.users + ' Informasi Data</div>' +
+        '<div class="warga-info-grid">' +
+          '<div class="warga-info-row"><span class="lbl">Nama</span><span class="val">' + esc(p.nama) + '</span></div>' +
+          '<div class="warga-info-row"><span class="lbl">NIK</span><span class="val mono">' + esc(p.nik) + '</span></div>' +
+          '<div class="warga-info-row"><span class="lbl">Jenis Kelamin</span><span class="val">' + esc(p.jenisKelamin) + '</span></div>' +
+          '<div class="warga-info-row"><span class="lbl">Usia</span><span class="val">' + (p.usia || '-') + ' tahun</span></div>' +
+          '<div class="warga-info-row"><span class="lbl">Kampung</span><span class="val">' + esc(p.kampung) + '</span></div>' +
+          '<div class="warga-info-row"><span class="lbl">RT</span><span class="val">' + rtLabel(p.rt) + '</span></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="warga-section">' +
+        '<div class="warga-section-title">' + ICONS.ttd + ' Bukti Fotokopi KTP yang Ditandatangani</div>' +
+        (fotoTTD
+          ? '<img class="warga-foto" src="' + esc(fotoTTD) + '" alt="Bukti TTD ' + esc(p.nama) + '" onclick="window.__showFoto(\'' + esc(fotoTTD) + '\')">' +
+            '<div class="warga-ttd-note">✅ Sudah diverifikasi dengan bukti TTD</div>'
+          : '<div class="warga-foto-empty">' +
+              (isVerified
+                ? '⚠️ Status PASTI tapi bukti TTD belum diupload'
+                : '⏳ Belum diverifikasi'
+              ) +
+            '</div>'
+        ) +
+      '</div>' +
+
+      (!isAdmin() ? '' : '<div class="warga-actions">' +
+        (isVerified
+          ? '<button class="btn btn-outline" id="btnDetailUnverify" type="button" style="flex:1">' + ICONS.clock + ' Batal Verifikasi</button>'
+          : '<button class="btn btn-primary" id="btnDetailVerify" type="button" style="flex:1">' + ICONS.shield + ' Verifikasi Sekarang</button>'
+        ) +
+      '</div>');
+
+    const btnClose = $('btnCloseDetailWarga');
+    if (btnClose) btnClose.addEventListener('click', () => {
+      $('modalDetailWarga').classList.remove('show');
+      state.detailWargaId = null;
+    });
+
+    const btnVerify = $('btnDetailVerify');
+    if (btnVerify) {
+      btnVerify.addEventListener('click', () => {
+        $('modalDetailWarga').classList.remove('show');
+        state.detailWargaId = null;
+        window.__startVerify(p.id);
+      });
+    }
+
+    const btnUnverify = $('btnDetailUnverify');
+    if (btnUnverify) {
+      btnUnverify.addEventListener('click', () => {
+        $('modalDetailWarga').classList.remove('show');
+        state.detailWargaId = null;
+        window.__unverifyData(p.id);
+      });
+    }
+  }
+
+  // ============================================================ //
+  // MODAL VERIFIKASI TTD                                          //
+  // ============================================================ //
+  window.__startVerify = function(id) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) { toast('Data tidak ditemukan', 'error'); return; }
+
+    state.verifyId = id;
+    state.verifyFotoTTDBase64 = null;
+    state.verifyFotoTTDMime = null;
+
+    renderModalVerifTTD(p);
+    $('modalVerifTTD').classList.add('show');
+  };
+
+  function renderModalVerifTTD(p) {
+    const content = $('modalVerifTTDContent');
+    if (!content) return;
+
+    const isP = p.jenisKelamin === 'Perempuan';
+    const initials = (p.nama || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+
+    content.innerHTML =
+      '<div class="verif-head">' +
+        '<div class="verif-icon">' + ICONS.shield + '</div>' +
+        '<h3>Verifikasi Suara PASTI</h3>' +
+        '<p>Upload bukti fotokopi KTP yang sudah ditandatangani warga</p>' +
+      '</div>' +
+
+      '<div class="verif-info">' +
+        '<div class="verif-avatar' + (isP ? ' p' : '') + '">' + esc(initials) + '</div>' +
+        '<div>' +
+          '<div class="verif-name">' + esc(p.nama) + '</div>' +
+          '<div class="verif-nik">' + esc(p.nik) + '</div>' +
+          '<div class="verif-meta">' + esc(p.kampung) + ' • ' + rtLabel(p.rt) + '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="verif-upload">' +
+        '<label class="form-label">📸 Bukti Fotokopi KTP yang Ditandatangani <span class="req">*</span></label>' +
+        '<div class="foto-box" id="verifTTDBox">' +
+          '<div class="foto-placeholder" id="verifTTDPlaceholder">' +
+            '<div class="ico">' + ICONS.ttd + '</div>' +
+            'Ambil foto bukti TTD langsung atau pilih dari galeri' +
+          '</div>' +
+          '<img id="verifTTDPreview" class="foto-preview" style="display:none" alt="">' +
+          '<div class="foto-btns">' +
+            '<button type="button" class="foto-btn primary" id="btnVerifKamera">' + ICONS.camera + 'Kamera</button>' +
+            '<button type="button" class="foto-btn" id="btnVerifGaleri">' + ICONS.gallery + 'Galeri</button>' +
+          '</div>' +
+          '<button type="button" class="foto-hapus" id="btnVerifHapus" style="display:none">' + ICONS.trash + ' Hapus</button>' +
+        '</div>' +
+        '<div class="form-hint" style="margin-top:8px">⚠️ Wajib upload bukti TTD untuk verifikasi</div>' +
+      '</div>' +
+
+      '<div class="confirm-btns" style="margin-top:20px">' +
+        '<button class="btn btn-outline" id="btnVerifCancel" type="button">Batal</button>' +
+        '<button class="btn btn-primary" id="btnVerifSave" type="button">' + ICONS.shield + ' Verifikasi</button>' +
+      '</div>';
+
+    $('btnVerifKamera').addEventListener('click', () => $('verifCameraInput').click());
+    $('btnVerifGaleri').addEventListener('click', () => $('verifGalleryInput').click());
+    $('verifCameraInput').onchange = handleVerifFotoInput;
+    $('verifGalleryInput').onchange = handleVerifFotoInput;
+    $('btnVerifHapus').addEventListener('click', clearVerifFoto);
+    $('btnVerifCancel').addEventListener('click', closeModalVerif);
+    $('btnVerifSave').addEventListener('click', doVerifyWithTTD);
+  }
+
+  function handleVerifFotoInput(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { toast('Foto maksimal 8 MB', 'error'); e.target.value = ''; return; }
+    compressImage(file, (base64, mime) => {
+      if (!base64) { toast('Gagal memproses foto', 'error'); e.target.value = ''; return; }
+      state.verifyFotoTTDBase64 = base64;
+      state.verifyFotoTTDMime = mime;
+      $('verifTTDPreview').src = base64;
+      $('verifTTDPreview').style.display = 'block';
+      $('verifTTDPlaceholder').style.display = 'none';
+      $('verifTTDBox').classList.add('has-foto');
+      $('btnVerifHapus').style.display = 'flex';
+      e.target.value = '';
+    });
+  }
+
+  function clearVerifFoto() {
+    state.verifyFotoTTDBase64 = null;
+    state.verifyFotoTTDMime = null;
+    $('verifTTDPreview').style.display = 'none';
+    $('verifTTDPreview').src = '';
+    $('verifTTDPlaceholder').style.display = 'block';
+    $('verifTTDBox').classList.remove('has-foto');
+    $('btnVerifHapus').style.display = 'none';
+  }
+
+  function closeModalVerif() {
+    $('modalVerifTTD').classList.remove('show');
+    state.verifyId = null;
+    state.verifyFotoTTDBase64 = null;
+    state.verifyFotoTTDMime = null;
+  }
+
+  function doVerifyWithTTD() {
+    if (!state.verifyId) { toast('Data tidak valid', 'error'); return; }
+    if (!state.verifyFotoTTDBase64) { toast('Bukti TTD wajib diupload', 'error'); return; }
+
+    const btn = $('btnVerifSave');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Memverifikasi...';
+
+    google.script.run
+      .withSuccessHandler(r => {
+        btn.disabled = false;
+        btn.innerHTML = ICONS.shield + ' Verifikasi';
+        if (r.ok) {
+          toast('✅ ' + r.message, 'success');
+          const p = (state.allData || []).find(x => String(x.id) === String(state.verifyId));
+          if (p) {
+            p.verified = true;
+            p.fotoTTD = r.fotoTTD || '';
+            p.fotoTTDId = r.fotoTTDId || '';
+          }
+          if (r.version) state.version = r.version;
+          state.dashboardCache = null;
+          closeModalVerif();
+          if (state.page === 'data') renderData();
+          else if (state.page === 'detail-kampung') renderDetailKampung();
+        } else {
+          toast('❌ ' + r.message, 'error');
+        }
+      })
+      .withFailureHandler(e => {
+        btn.disabled = false;
+        btn.innerHTML = ICONS.shield + ' Verifikasi';
+        toast('Gagal: ' + e.message, 'error');
+      })
+      .apiVerifyWithTTD({
+        id: state.verifyId,
+        fotoTTDBase64: state.verifyFotoTTDBase64,
+        fotoTTDMime: state.verifyFotoTTDMime
+      });
+  }
+
+  window.__unverifyData = function(id) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) { toast('Data tidak ditemukan', 'error'); return; }
+
+    $('confirmTitle').textContent = 'Batalkan Verifikasi?';
+    $('confirmMsg').innerHTML = 'Status <b>' + esc(p.nama) + '</b> akan dikembalikan ke BELUM PASTI. Bukti TTD juga akan dihapus.';
+    $('confirmYes').textContent = 'Ya, Batalkan';
+    state.confirmCb = () => {
+      google.script.run
+        .withSuccessHandler(r => {
+          closeConfirm();
+          if (r.ok) {
+            toast('✅ ' + r.message, 'success');
+            const px = (state.allData || []).find(x => String(x.id) === String(id));
+            if (px) {
+              px.verified = false;
+              px.fotoTTD = '';
+              px.fotoTTDId = '';
+            }
+            if (r.version) state.version = r.version;
+            state.dashboardCache = null;
+            if (state.page === 'data') renderData();
+            else if (state.page === 'detail-kampung') renderDetailKampung();
+          } else {
+            toast('❌ ' + r.message, 'error');
+          }
+        })
+        .withFailureHandler(e => {
+          closeConfirm();
+          toast('Gagal: ' + e.message, 'error');
+        })
+        .apiUnverify(id);
+    };
+    $('modalConfirm').classList.add('show');
+  };
+
+  // ⭐ Toggle status "Dicetak" — langsung tanpa modal konfirmasi (aksi ringan & mudah dibalik)
+  window.__togglePrint = function(id, btnEl) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) { toast('Data tidak ditemukan', 'error'); return; }
+
+    const next = !(p.dicetak === true);
+    if (btnEl) btnEl.disabled = true;
+
+    google.script.run
+      .withSuccessHandler(r => {
+        if (btnEl) btnEl.disabled = false;
+        if (r.ok) {
+          const px = (state.allData || []).find(x => String(x.id) === String(id));
+          if (px) px.dicetak = r.dicetak === true;
+          if (r.version) state.version = r.version;
+          state.dashboardCache = null;
+          toast(r.dicetak ? '🖨️ Ditandai sudah dicetak' : 'Ditandai belum dicetak', 'success');
+          if (state.page === 'data') renderData();
+          else if (state.page === 'detail-kampung') renderDetailKampung();
+        } else {
+          toast('❌ ' + r.message, 'error');
+        }
+      })
+      .withFailureHandler(e => {
+        if (btnEl) btnEl.disabled = false;
+        toast('Gagal: ' + e.message, 'error');
+      })
+      .apiTogglePrint(id, next);
+  };
+
+  function setupLazyImages(container) {
+    const imgs = container.querySelectorAll('img.person-foto[data-src]');
+    imgs.forEach(img => {
+      img.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const full = img.getAttribute('data-full');
+        if (full) window.__showFoto(full);
+      });
+    });
+    if (!('IntersectionObserver' in window)) {
+      imgs.forEach(img => {
+        img.src = img.getAttribute('data-src');
+        img.removeAttribute('data-src');
+      });
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const img = entry.target;
+          const src = img.getAttribute('data-src');
+          if (src) {
+            img.src = src;
+            img.removeAttribute('data-src');
+          }
+          observer.unobserve(img);
+        }
+      });
+    }, { rootMargin: '200px 0px' });
+    imgs.forEach(img => observer.observe(img));
+  }
+
+  // ============================================================ //
+  // EDIT & DELETE                                                 //
+  // ============================================================ //
+  window.__showFoto = function(url) {
+    // URL Drive lama (https://drive.google.com/...) diarahkan ke proxy
+    // ter-autentikasi /api/photo supaya tetap tampil tanpa sharing publik.
+    const m = String(url || '').match(/[?&]id=([\w-]+)/);
+    if (m && String(url).indexOf('drive.google') !== -1) {
+      url = '/api/photo?id=' + encodeURIComponent(m[1]);
+    }
+    $('modalFotoImg').src = url;
+    $('modalFoto').classList.add('show');
+  };
+
+  window.__editData = function(id) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) { toast('Data tidak ditemukan', 'error'); return; }
+    openEditModal(p);
+  };
+
+  window.__deleteData = function(id, nama) {
+    $('confirmTitle').textContent = 'Hapus Data?';
+    $('confirmMsg').innerHTML = 'Data <b>' + esc(nama) + '</b> akan dihapus permanen. Lanjutkan?';
+    $('confirmYes').textContent = 'Ya, Hapus';
+    state.confirmCb = () => {
+      google.script.run
+        .withSuccessHandler(r => {
+          closeConfirm();
+          if (r.ok) {
+            toast('✅ ' + r.message, 'success');
+            if (r.version) state.version = r.version;
+            state.prevIds = {};
+            state.dashboardCache = null;
+            fetchAndReplace(false);
+            checkDupBadge();
+            if ($('modalScanDup').classList.contains('show')) startScanDup();
+          } else {
+            toast('❌ ' + r.message, 'error');
+          }
+        })
+        .withFailureHandler(e => {
+          closeConfirm();
+          toast('Gagal: ' + e.message, 'error');
+        })
+        .apiDelete(id);
+    };
+    $('modalConfirm').classList.add('show');
+  };
+
+  function closeConfirm() {
+    $('modalConfirm').classList.remove('show');
+    state.confirmCb = null;
+  }
+
+  $('confirmNo').addEventListener('click', closeConfirm);
+  $('confirmYes').addEventListener('click', () => { if (state.confirmCb) state.confirmCb(); });
+
+  // ============================================================ //
+  // MODAL EDIT                                                    //
+  // ============================================================ //
+  function openEditModal(p) {
+    state.editId = p.id;
+    state.fotoBase64 = null;
+    state.fotoMime = null;
+    state.editFotoTTDBase64 = null;
+    state.editFotoTTDMime = null;
+    state.editHapusTTD = false;
+
+    let kampungOpts = '';
+    KAMPUNG_LIST.forEach(k => kampungOpts += '<option value="' + esc(k) + '"' + (p.kampung === k ? ' selected' : '') + '>' + esc(k) + '</option>');
+    if (KAMPUNG_LIST.indexOf(p.kampung) === -1 && p.kampung) {
+      kampungOpts = '<option value="' + esc(p.kampung) + '" selected>' + esc(p.kampung) + ' (tidak di config)</option>' + kampungOpts;
+    }
+
+    const curRT = normRT(p.rt);
+    let rtOpts = '';
+    RT_LIST.forEach(rt => {
+      const label = rt === RT_UMUM ? 'UMUM (Tanpa RT)' : ('RT ' + rt);
+      rtOpts += '<option value="' + rt + '"' + (curRT === rt ? ' selected' : '') + '>' + label + '</option>';
+    });
+
+    const isVerified = p.verified === true;
+    const hasTTD = !!(p.fotoTTD && String(p.fotoTTD).trim());
+
+    let buktiTTDHtml = '';
+    if (isVerified) {
+      buktiTTDHtml =
+        '<div class="form-group" id="eTTDGroup" style="background:#ecfdf5;border:1.5px solid #a7f3d0;border-radius:12px;padding:14px">' +
+          '<label class="form-label" style="color:#065f46;display:flex;align-items:center;gap:6px">' + ICONS.ttd + ' Bukti Fotokopi KTP yang Ditandatangani</label>' +
+          '<div class="foto-box' + (hasTTD ? ' has-foto' : '') + '" id="eTTDBox">' +
+            (hasTTD
+              ? '<img id="eTTDPreview" class="foto-preview" src="' + esc(p.fotoTTD) + '" alt="">'
+              : '<img id="eTTDPreview" class="foto-preview" style="display:none" alt="">'
+            ) +
+            '<div class="foto-placeholder" id="eTTDPlaceholder"' + (hasTTD ? ' style="display:none"' : '') + '>' +
+              '<div class="ico">' + ICONS.ttd + '</div>' +
+              'Upload / ganti bukti TTD' +
+            '</div>' +
+            '<div class="foto-btns">' +
+              '<button type="button" class="foto-btn primary" id="eBtnTTDKamera">' + ICONS.camera + 'Kamera</button>' +
+              '<button type="button" class="foto-btn" id="eBtnTTDGaleri">' + ICONS.gallery + 'Galeri</button>' +
+            '</div>' +
+            (hasTTD
+              ? '<button type="button" class="foto-hapus" id="eBtnTTDHapus" style="display:flex">' + ICONS.trash + ' Hapus Bukti TTD</button>'
+              : '<button type="button" class="foto-hapus" id="eBtnTTDHapus" style="display:none">' + ICONS.trash + ' Hapus Bukti TTD</button>'
+            ) +
+          '</div>' +
+        '</div>';
+    }
+
+    $('modalEditContent').innerHTML =
+      '<div class="section-title" style="margin-top:0">Edit Data Pendukung</div>' +
+      (isVerified
+        ? '<div style="background:linear-gradient(135deg,#d1fae5,#a7f3d0);border-left:3px solid #059669;padding:12px 14px;border-radius:10px;margin-bottom:14px;font-size:12px;color:#065f46;font-weight:700;display:flex;align-items:center;gap:8px">' + ICONS.shield + ' Data ini sudah diverifikasi (Suara PASTI)</div>'
+        : ''
+      ) +
+      '<div class="form-group">' +
+        '<label class="form-label">Nama Lengkap <span class="req">*</span></label>' +
+        '<input type="text" class="form-input" id="eNama" value="' + esc(p.nama) + '">' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label">NIK <span class="req">*</span></label>' +
+        '<input type="tel" class="form-input" id="eNik" value="' + esc(p.nik) + '" maxlength="16" inputmode="numeric">' +
+        '<div class="nik-preview" id="eNikPreview" style="display:block">🔒 NIK tidak boleh sama dengan orang lain</div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-group">' +
+          '<label class="form-label">Kampung</label>' +
+          '<select class="form-select" id="eKampung">' + kampungOpts + '</select>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label class="form-label">RT</label>' +
+          '<select class="form-select" id="eRt">' + rtOpts + '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label">Foto KTP</label>' +
+        '<div class="foto-box' + (p.fotoKTP ? ' has-foto' : '') + '" id="eFotoBox">' +
+          (p.fotoKTP
+            ? '<img id="eFotoPreview" class="foto-preview" src="' + esc(p.fotoKTP) + '" alt="">'
+            : '<img id="eFotoPreview" class="foto-preview" style="display:none" alt="">'
+          ) +
+          '<div class="foto-placeholder" id="eFotoPlaceholder"' + (p.fotoKTP ? ' style="display:none"' : '') + '>' +
+            '<div class="ico">' + ICONS.card + '</div>' +
+            'Ganti foto KTP atau biarkan tetap' +
+          '</div>' +
+          '<div class="foto-btns">' +
+            '<button type="button" class="foto-btn primary" id="eBtnKamera">' + ICONS.camera + 'Kamera</button>' +
+            '<button type="button" class="foto-btn" id="eBtnGaleri">' + ICONS.gallery + 'Galeri</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      buktiTTDHtml +
+      '<div class="confirm-btns">' +
+        '<button class="btn btn-outline" id="eCancel" type="button">Batal</button>' +
+        '<button class="btn btn-primary" id="eSave" type="button">' + ICONS.save + ' Simpan</button>' +
+      '</div>';
+
+    const currentNik = String(p.nik);
+    $('eNik').addEventListener('input', e => {
+      e.target.value = e.target.value.replace(/\D/g, '').slice(0, 16);
+      const nikVal = e.target.value;
+      const pv = $('eNikPreview');
+      e.target.classList.remove('dup-input', 'ok-input');
+      if (nikVal.length < 16) {
+        pv.className = 'nik-preview';
+        pv.textContent = nikVal.length > 0 ? 'Ketik ' + (16 - nikVal.length) + ' digit lagi...' : '🔒 NIK tidak boleh sama dengan orang lain';
+        return;
+      }
+      const r = parseNIK(nikVal);
+      if (!r.valid) {
+        pv.className = 'nik-preview error';
+        pv.textContent = '⚠️ ' + r.msg;
+        return;
+      }
+      if (nikVal === currentNik) {
+        pv.className = 'nik-preview';
+        pv.innerHTML = '👤 <b>' + r.jenisKelamin + '</b> • 🎂 ' + r.tglText + ' • 📅 Usia <b>' + r.usia + '</b>';
+        return;
+      }
+      pv.className = 'nik-preview checking';
+      pv.innerHTML = '👤 <b>' + r.jenisKelamin + '</b> • 🎂 ' + r.tglText + ' • 📅 Usia <b>' + r.usia + '</b><br>🔍 Mengecek...';
+      clearTimeout(state.nikCheckTimer);
+      state.nikCheckTimer = setTimeout(() => {
+        google.script.run
+          .withSuccessHandler(chk => {
+            const pv2 = $('eNikPreview');
+            const inp = $('eNik');
+            if (!pv2 || !inp) return;
+            if (!chk.ok) {
+              pv2.className = 'nik-preview error';
+              pv2.textContent = '⚠️ ' + chk.message;
+              return;
+            }
+            if (chk.tersedia) {
+              inp.classList.add('ok-input');
+              pv2.className = 'nik-preview';
+              pv2.innerHTML = '✅ NIK tersedia • 👤 <b>' + r.jenisKelamin + '</b> • 📅 Usia <b>' + r.usia + '</b>';
+            } else {
+              inp.classList.add('dup-input');
+              pv2.className = 'nik-preview dup';
+              pv2.innerHTML = '❌ <b>NIK SUDAH DIPAKAI!</b><br>👤 ' + esc(chk.duplikat[0].nama) + ' • ' + esc(chk.duplikat[0].kampung) + ' ' + rtLabel(chk.duplikat[0].rt);
+            }
+          })
+          .withFailureHandler(err => {
+            const pv2 = $('eNikPreview');
+            if (pv2) {
+              pv2.className = 'nik-preview error';
+              pv2.textContent = '⚠️ Gagal cek NIK';
+            }
+          })
+          .apiCheckNik({ nik: nikVal, excludeId: p.id });
+      }, 300);
+    });
+
+    $('eBtnKamera').addEventListener('click', () => $('editCameraInput').click());
+    $('eBtnGaleri').addEventListener('click', () => $('editGalleryInput').click());
+    $('editCameraInput').onchange = handleEditInput;
+    $('editGalleryInput').onchange = handleEditInput;
+
+    if (isVerified) {
+      const btnTTDKamera = $('eBtnTTDKamera');
+      const btnTTDGaleri = $('eBtnTTDGaleri');
+      const btnTTDHapus = $('eBtnTTDHapus');
+
+      if (btnTTDKamera) btnTTDKamera.addEventListener('click', () => $('editTTDCameraInput').click());
+      if (btnTTDGaleri) btnTTDGaleri.addEventListener('click', () => $('editTTDGalleryInput').click());
+      $('editTTDCameraInput').onchange = handleEditTTDInput;
+      $('editTTDGalleryInput').onchange = handleEditTTDInput;
+
+      if (btnTTDHapus) {
+        btnTTDHapus.addEventListener('click', () => {
+          state.editHapusTTD = true;
+          state.editFotoTTDBase64 = null;
+          state.editFotoTTDMime = null;
+          $('eTTDPreview').style.display = 'none';
+          $('eTTDPreview').src = '';
+          $('eTTDPlaceholder').style.display = 'block';
+          $('eTTDBox').classList.remove('has-foto');
+          btnTTDHapus.style.display = 'none';
+          toast('Bukti TTD akan dihapus saat simpan', 'warn');
+        });
+      }
+    }
+
+    $('eCancel').addEventListener('click', () => {
+      $('modalEdit').classList.remove('show');
+      state.editId = null;
+      state.fotoBase64 = null;
+      state.fotoMime = null;
+      state.editFotoTTDBase64 = null;
+      state.editFotoTTDMime = null;
+      state.editHapusTTD = false;
+    });
+
+    $('eSave').addEventListener('click', saveEdit);
+
+    $('modalEdit').classList.add('show');
+  }
+
+  function handleEditInput(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast('Foto maksimal 8 MB', 'error');
+      e.target.value = '';
+      return;
+    }
+    compressImage(file, (base64, mime) => {
+      if (!base64) {
+        toast('Gagal memproses foto', 'error');
+        e.target.value = '';
+        return;
+      }
+      state.fotoBase64 = base64;
+      state.fotoMime = mime;
+      const pv = $('eFotoPreview');
+      if (pv) {
+        pv.src = base64;
+        pv.style.display = 'block';
+        $('eFotoPlaceholder').style.display = 'none';
+        $('eFotoBox').classList.add('has-foto');
+      }
+      e.target.value = '';
+    });
+  }
+
+  function handleEditTTDInput(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast('Foto maksimal 8 MB', 'error');
+      e.target.value = '';
+      return;
+    }
+    compressImage(file, (base64, mime) => {
+      if (!base64) {
+        toast('Gagal memproses foto', 'error');
+        e.target.value = '';
+        return;
+      }
+      state.editFotoTTDBase64 = base64;
+      state.editFotoTTDMime = mime;
+      state.editHapusTTD = false;
+      const pv = $('eTTDPreview');
+      if (pv) {
+        pv.src = base64;
+        pv.style.display = 'block';
+        $('eTTDPlaceholder').style.display = 'none';
+        $('eTTDBox').classList.add('has-foto');
+        const btnHapus = $('eBtnTTDHapus');
+        if (btnHapus) btnHapus.style.display = 'flex';
+      }
+      e.target.value = '';
+    });
+  }
+
+  function saveEdit() {
+    const id = state.editId;
+    const nama = $('eNama').value.trim();
+    const nik = $('eNik').value.trim();
+    const kampung = $('eKampung').value;
+    const rt = normRT($('eRt').value);
+    if (!nama || !/^\d{16}$/.test(nik)) {
+      toast('Periksa nama & NIK', 'error');
+      return;
+    }
+
+    const btn = $('eSave');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div>';
+
+    const payload = {
+      id, nama, nik, kampung, rt,
+      fotoBase64: state.fotoBase64,
+      fotoMime: state.fotoMime
+    };
+
+    if (state.editFotoTTDBase64) {
+      payload.fotoTTDBase64 = state.editFotoTTDBase64;
+      payload.fotoTTDMime = state.editFotoTTDMime;
+    }
+
+    google.script.run
+      .withSuccessHandler(r => {
+        btn.disabled = false;
+        btn.innerHTML = ICONS.save + ' Simpan';
+        if (r.ok) {
+          toast('✅ ' + r.message, 'success');
+          $('modalEdit').classList.remove('show');
+          state.editId = null;
+          state.fotoBase64 = null;
+          state.fotoMime = null;
+          state.editFotoTTDBase64 = null;
+          state.editFotoTTDMime = null;
+          state.editHapusTTD = false;
+          if (r.version) state.version = r.version;
+          state.prevIds = {};
+          state.dashboardCache = null;
+          fetchAndReplace(false);
+        } else {
+          if (r.duplikat && r.duplikat.length) showDupWarning(r.duplikat);
+          else toast('❌ ' + r.message, 'error');
+        }
+      })
+      .withFailureHandler(e => {
+        btn.disabled = false;
+        btn.innerHTML = ICONS.save + ' Simpan';
+        toast('Gagal: ' + e.message, 'error');
+      })
+      .apiUpdate(payload);
+  }
+
+  // ============================================================ //
+  // SCAN DUPLIKAT                                                 //
+  // ============================================================ //
+  $('fabScan').addEventListener('click', () => {
+    state.scanResult = null;
+    renderScanIntro();
+    $('modalScanDup').classList.add('show');
+  });
+
+  $('scanCloseBtn').addEventListener('click', () => {
+    $('modalScanDup').classList.remove('show');
+  });
+
+  function renderScanIntro() {
+    const wrap = $('scanResultWrap');
+    if (!wrap) return;
+    wrap.innerHTML =
+      '<div class="scan-intro">' +
+        '<div class="scan-intro-ico">🔍</div>' +
+        '<h4>Siap Memindai Database</h4>' +
+        '<p>Klik tombol di bawah untuk memeriksa apakah ada NIK yang terdaftar lebih dari sekali di seluruh database.</p>' +
+        '<button class="scan-start-btn" id="btnScanStart" type="button">' + ICONS.dupScan + ' Mulai Scan Sekarang</button>' +
+      '</div>';
+    $('btnScanStart').addEventListener('click', () => startScanDup());
+  }
+
+  function renderScanLoading() {
+    const wrap = $('scanResultWrap');
+    if (!wrap) return;
+    wrap.innerHTML =
+      '<div class="scan-loading">' +
+        '<div class="scan-spin"></div>' +
+        '<h4>Memindai Database...</h4>' +
+        '<p>Mohon tunggu sebentar, memeriksa semua NIK</p>' +
+      '</div>';
+  }
+
+  function startScanDup() {
+    renderScanLoading();
+    google.script.run
+      .withSuccessHandler(r => {
+        if (!r.ok) {
+          toast('Gagal scan: ' + r.message, 'error');
+          renderScanIntro();
+          return;
+        }
+        state.scanResult = r;
+        renderScanResult(r);
+        updateFabBadge(r.totalGroup || 0);
+      })
+      .withFailureHandler(e => {
+        toast('Gagal scan: ' + e.message, 'error');
+        renderScanIntro();
+      })
+      .apiScanDuplikat();
+  }
+
+  function updateFabBadge(count) {
+    const badge = $('fabBadge');
+    const fab = $('fabScan');
+    if (!badge || !fab) return;
+    if (count > 0) {
+      badge.textContent = count > 99 ? '99+' : String(count);
+      badge.style.display = 'flex';
+      fab.classList.add('pulse');
+    } else {
+      badge.style.display = 'none';
+      fab.classList.remove('pulse');
+    }
+  }
+
+  function renderScanResult(r) {
+    const wrap = $('scanResultWrap');
+    if (!wrap) return;
+
+    if (r.totalGroup === 0) {
+      wrap.innerHTML =
+        '<div class="scan-ok">' +
+          '<div class="scan-ok-ico">' + ICONS.check + '</div>' +
+          '<h4>Database Bersih! 🎉</h4>' +
+          '<p>Tidak ada NIK duplikat. Semua data pendukung sudah unik.</p>' +
+          '<div class="scan-ok-stats">' +
+            '<div class="st"><div class="n">0</div><div class="l">Duplikat</div></div>' +
+            '<div class="st"><div class="n">' + (state.allData ? state.allData.length : 0) + '</div><div class="l">Total NIK</div></div>' +
+          '</div>' +
+        '</div>';
+      return;
+    }
+
+    let html =
+      '<div class="scan-found-head">' +
+        '<div class="ttl">⚠️ Ditemukan Duplikat!</div>' +
+        '<div class="big">' + r.totalGroup + '</div>' +
+        '<div class="desc">NIK unik yang terdaftar lebih dari 1 kali</div>' +
+      '</div>' +
+      '<div class="scan-summary-row">' +
+        '<div class="scan-summary-item"><div class="n">' + r.totalGroup + '</div><div class="l">Grup NIK</div></div>' +
+        '<div class="scan-summary-item"><div class="n">' + r.totalBaris + '</div><div class="l">Total Baris</div></div>' +
+      '</div>';
+
+    r.duplikat.forEach(g => {
+      html +=
+        '<div class="scan-group">' +
+          '<div class="scan-group-head">' +
+            '<div class="scan-group-nik">' +
+              '<span>🔢</span>' +
+              '<span>' + esc(g.nik) + '</span>' +
+              '<span class="badge">' + g.entries.length + 'x</span>' +
+            '</div>' +
+          '</div>';
+      g.entries.forEach(e => {
+        html +=
+          '<div class="scan-entry">' +
+            '<div class="scan-entry-num">#' + e.rowNum + '</div>' +
+            '<div class="scan-entry-info">' +
+              '<div class="scan-entry-name">' + esc(e.nama) + '</div>' +
+              '<div class="scan-entry-meta">' + esc(e.kampung) + ' • ' + rtLabel(e.rt) + '</div>' +
+            '</div>' +
+            '<button class="scan-entry-del" data-action="del-dup" data-id="' + esc(e.id) + '" data-nama="' + esc(e.nama) + '" type="button">Hapus</button>' +
+          '</div>';
+      });
+      html += '</div>';
+    });
+
+    html +=
+      '<div class="scan-actions">' +
+        '<button class="scan-btn-rescan" id="btnRescan" type="button">' + ICONS.refresh + ' Scan Ulang</button>' +
+        '<button class="scan-btn-done" id="btnScanDone" type="button">' + ICONS.check + ' Selesai</button>' +
+      '</div>';
+
+    wrap.innerHTML = html;
+
+    wrap.querySelectorAll('[data-action="del-dup"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-id');
+        const nama = btn.getAttribute('data-nama');
+        window.__deleteData(id, nama);
+      });
+    });
+
+    const btnRescan = $('btnRescan');
+    if (btnRescan) btnRescan.addEventListener('click', () => startScanDup());
+
+    const btnDone = $('btnScanDone');
+    if (btnDone) btnDone.addEventListener('click', () => {
+      $('modalScanDup').classList.remove('show');
+    });
+  }
+
+  // ============================================================ //
+  // HALAMAN PENGATURAN                                            //
+  // ============================================================ //
+  function renderPengaturan() {
+    const c = $('appContent');
+    if (!c) return;
+    const token = state.pageToken;
+
+    if (state.cfgCache && state.dashboardCache) {
+      renderPengaturanUI();
+      refreshPengaturanData(token);
+      return;
+    }
+    if (state.cfgCache) {
+      renderPengaturanUI();
+      refreshPengaturanData(token);
+      return;
+    }
+
+    c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat pengaturan...</p></div>';
+
+    google.script.run
+      .withSuccessHandler(cfgR => {
+        if (!isStillOn(token, 'pengaturan')) return;
+        if (cfgR.ok) applyConfig(cfgR.data);
+        google.script.run
+          .withSuccessHandler(r => {
+            if (!isStillOn(token, 'pengaturan')) return;
+            if (r.ok) {
+              state.dashboardCache = r.data;
+              STATS_PER_KAMPUNG = r.data.perKampung || {};
+              STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
+              if (r.data.kampungList && !state.cfgCache) applyConfig(r.data);
+            }
+            renderPengaturanUI();
+          })
+          .withFailureHandler(() => {
+            if (!isStillOn(token, 'pengaturan')) return;
+            renderPengaturanUI();
+          })
+          .apiGetDashboard();
+      })
+      .withFailureHandler(() => {
+        if (!isStillOn(token, 'pengaturan')) return;
+        renderPengaturanUI();
+      })
+      .apiGetConfig();
+  }
+
+  function refreshPengaturanData(token) {
+    google.script.run
+      .withSuccessHandler(cfgR => {
+        if (!isStillOn(token, 'pengaturan')) return;
+        if (cfgR.ok) applyConfig(cfgR.data);
+        google.script.run
+          .withSuccessHandler(r => {
+            if (!isStillOn(token, 'pengaturan')) return;
+            if (r.ok) {
+              state.dashboardCache = r.data;
+              STATS_PER_KAMPUNG = r.data.perKampung || {};
+              STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
+              renderPengaturanUI();
+            }
+          })
+          .withFailureHandler(() => {})
+          .apiGetDashboard();
+      })
+      .withFailureHandler(() => {})
+      .apiGetConfig();
+  }
+
+  function renderPengaturanUI() {
+    const c = $('appContent');
+    if (!c) return;
+
+    let totalTargetKampung = 0, totalRealisasi = 0, totalVerified = 0;
+    KAMPUNG_LIST.forEach(k => {
+      totalTargetKampung += parseInt(TARGET_PER_KAMPUNG[k] || 0, 10);
+      totalRealisasi += parseInt(STATS_PER_KAMPUNG[k] || 0, 10);
+      totalVerified += parseInt(STATS_VERIFIED_PER_KAMPUNG[k] || 0, 10);
+    });
+    const targetEffective = TARGET_TOTAL > 0 ? TARGET_TOTAL : totalTargetKampung;
+    const pctTotal = targetEffective > 0 ? Math.min(100, Math.round((totalRealisasi / targetEffective) * 100)) : 0;
+
+    let kampungCards = '';
+    KAMPUNG_LIST.forEach((k, idx) => {
+      const target = parseInt(TARGET_PER_KAMPUNG[k] || 0, 10);
+      const realisasi = parseInt(STATS_PER_KAMPUNG[k] || 0, 10);
+      const verif = parseInt(STATS_VERIFIED_PER_KAMPUNG[k] || 0, 10);
+      const pct = target > 0 ? Math.min(100, Math.round((realisasi / target) * 100)) : 0;
+
+      let fillClass = '', pctClass = '';
+      if (target > 0) {
+        if (pct >= 100) pctClass = 'done';
+        else if (pct >= 60) { fillClass = ''; pctClass = ''; }
+        else if (pct >= 30) { fillClass = 'warn'; pctClass = 'med'; }
+        else { fillClass = 'danger'; pctClass = 'low'; }
+      }
+
+      let progressHtml = '';
+      if (target > 0) {
+        progressHtml =
+          '<div class="cfg-kk-progress">' +
+            '<div class="cfg-kk-progress-head">' +
+              '<span class="val">' + fmtNum(realisasi) + ' <span style="color:var(--muted);font-weight:600">/ ' + fmtNum(target) + '</span></span>' +
+              '<span class="pct ' + pctClass + '">' + pct + '%</span>' +
+            '</div>' +
+            '<div class="cfg-kk-progress-bar">' +
+              '<div class="cfg-kk-progress-fill ' + fillClass + '" style="width:' + pct + '%"></div>' +
+            '</div>' +
+          '</div>';
+      } else {
+        progressHtml = '<div class="cfg-kk-target-info empty">' + ICONS.info + ' Target belum diset • Realisasi: <b style="color:var(--text)">' + fmtNum(realisasi) + '</b> orang</div>';
+      }
+
+      let verifHtml = '';
+      if (realisasi > 0) {
+        const pctV = Math.round((verif / realisasi) * 100);
+        verifHtml = '<div class="cfg-kk-target-info" style="background:#ecfdf5;color:#065f46;margin-top:6px">' + ICONS.shield + ' <b>' + fmtNum(verif) + '</b> pasti (' + pctV + '%)</div>';
+      }
+
+      kampungCards +=
+        '<div class="cfg-kampung-card">' +
+          '<div class="cfg-kk-head">' +
+            '<div class="cfg-kk-avatar">' + esc(initialsOf(k)) + '</div>' +
+            '<div class="cfg-kk-info">' +
+              '<div class="cfg-kk-name">' + esc(k) + '</div>' +
+              '<div class="cfg-kk-sub">' + (target > 0 ? 'Target ' + fmtNum(target) + ' suara' : 'Tanpa target khusus') + '</div>' +
+            '</div>' +
+            '<div class="cfg-kk-actions">' +
+              '<button class="cfg-kk-btn edit" data-act="edit-kampung" data-idx="' + idx + '" title="Edit" type="button">' + ICONS.edit + '</button>' +
+              '<button class="cfg-kk-btn del" data-act="del-kampung" data-idx="' + idx + '" title="Hapus" type="button">' + ICONS.trash + '</button>' +
+            '</div>' +
+          '</div>' +
+          progressHtml +
+          verifHtml +
+        '</div>';
+    });
+
+    if (KAMPUNG_LIST.length === 0) {
+      kampungCards = '<div class="cfg-empty"><div class="ico">🏘️</div><p>Belum ada kampung.<br>Klik tombol di bawah untuk menambahkan.</p></div>';
+    }
+
+    c.innerHTML =
+      '<div class="cfg-hero">' +
+        '<div class="cfg-hero-content">' +
+          '<div class="cfg-hero-label">' + ICONS.settings + ' PENGATURAN APLIKASI</div>' +
+          '<div class="cfg-hero-title">' + esc(NAMA_PILKADES) + '</div>' +
+          '<div class="cfg-hero-cand">Kandidat: ' + esc(NAMA_KANDIDAT) + '</div>' +
+        '</div>' +
+        '<div class="cfg-hero-stats">' +
+          '<div class="cfg-hero-stat"><div class="lbl">Kampung</div><div class="val">' + KAMPUNG_LIST.length + '</div></div>' +
+          '<div class="cfg-hero-stat"><div class="lbl">Target Total</div><div class="val">' + fmtNum(targetEffective) + '<span class="unit">suara</span></div></div>' +
+          '<div class="cfg-hero-stat"><div class="lbl">Realisasi</div><div class="val">' + fmtNum(totalRealisasi) + '<span class="unit">orang</span></div></div>' +
+          '<div class="cfg-hero-stat"><div class="lbl">Pasti</div><div class="val">' + fmtNum(totalVerified) + '<span class="unit">✅</span></div></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="cfg-section">' +
+        '<div class="cfg-section-head">' +
+          '<div class="cfg-section-ico">' + ICONS.flag + '</div>' +
+          '<div><div class="cfg-section-title">Info Pilkades</div><div class="cfg-section-sub">Nama kegiatan & kandidat</div></div>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label class="form-label">Nama Pilkades</label>' +
+          '<input type="text" class="form-input" id="cfgNamaPilkades" value="' + esc(NAMA_PILKADES) + '" placeholder="Pilkades Seruni Mumbul 2026">' +
+        '</div>' +
+        '<div class="form-group" style="margin-bottom:0">' +
+          '<label class="form-label">Nama Kandidat</label>' +
+          '<input type="text" class="form-input" id="cfgNamaKandidat" value="' + esc(NAMA_KANDIDAT) + '" placeholder="Pak Muhaimin (Pak Emen)">' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="cfg-section">' +
+        '<div class="cfg-section-head">' +
+          '<div class="cfg-section-ico">' + ICONS.target + '</div>' +
+          '<div><div class="cfg-section-title">Target Suara</div><div class="cfg-section-sub">Target total & per kampung</div></div>' +
+        '</div>' +
+        '<div class="form-group" style="margin-bottom:12px">' +
+          '<label class="form-label">🎯 Target Total Suara</label>' +
+          '<div class="target-input-group">' +
+            '<input type="number" id="cfgTargetTotal" value="' + targetEffective + '" min="1" inputmode="numeric" placeholder="500">' +
+            '<div class="unit">Suara</div>' +
+          '</div>' +
+          '<div class="form-hint">Total target untuk menang Pilkades.</div>' +
+        '</div>' +
+        '<div class="cfg-info">' + ICONS.info + '<div>Total target per kampung: <b>' + fmtNum(totalTargetKampung) + ' suara</b>. Realisasi: <b>' + fmtNum(totalRealisasi) + ' orang</b> (' + fmtNum(totalVerified) + ' pasti).</div></div>' +
+      '</div>' +
+
+      '<div class="cfg-section">' +
+        '<div class="cfg-section-head">' +
+          '<div class="cfg-section-ico">' + ICONS.home + '</div>' +
+          '<div><div class="cfg-section-title">Daftar Kampung</div><div class="cfg-section-sub">' + KAMPUNG_LIST.length + ' kampung terdaftar</div></div>' +
+        '</div>' +
+        '<div>' + kampungCards + '</div>' +
+        '<button class="cfg-add-btn" id="btnTambahKampung" type="button">' + ICONS.plus + ' Tambah Kampung Baru</button>' +
+        '<div class="cfg-info">' + ICONS.info + '<div>Kalau Anda <b>rename</b> kampung, semua data pendukung dengan kampung lama akan otomatis diupdate ke nama baru.</div></div>' +
+      '</div>' +
+
+      '<div class="cfg-save-bar">' +
+        '<button class="cfg-save-btn" id="btnSimpanCfg" type="button">' + ICONS.save + ' Simpan Semua Pengaturan</button>' +
+      '</div>';
+
+    document.querySelectorAll('[data-act="edit-kampung"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        openEditKampungModal(idx);
+      });
+    });
+
+    document.querySelectorAll('[data-act="del-kampung"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        deleteKampungDraft(idx);
+      });
+    });
+
+    const btnTambah = $('btnTambahKampung');
+    if (btnTambah) btnTambah.addEventListener('click', () => openEditKampungModal(-1));
+
+    const btnSimpan = $('btnSimpanCfg');
+    if (btnSimpan) btnSimpan.addEventListener('click', saveConfigFromUI);
+  }
+
+  function openEditKampungModal(idx) {
+    const isEdit = idx >= 0;
+    const oldName = isEdit ? KAMPUNG_LIST[idx] : '';
+    const oldTarget = isEdit ? (parseInt(TARGET_PER_KAMPUNG[oldName] || 0, 10)) : 0;
+    const realisasi = isEdit ? (parseInt(STATS_PER_KAMPUNG[oldName] || 0, 10)) : 0;
+    const verif = isEdit ? (parseInt(STATS_VERIFIED_PER_KAMPUNG[oldName] || 0, 10)) : 0;
+
+    $('modalKampungEditContent').innerHTML =
+      '<div class="mk-modal-head">' +
+        '<div class="mk-modal-ico">' + (isEdit ? ICONS.edit : ICONS.plus) + '</div>' +
+        '<div class="mk-modal-head-txt">' +
+          '<h3>' + (isEdit ? 'Edit Kampung' : 'Tambah Kampung Baru') + '</h3>' +
+          '<p>' + (isEdit ? 'Ubah nama dan/atau target suara' : 'Isi nama kampung dan target (opsional)') + '</p>' +
+        '</div>' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label">Nama Kampung <span class="req">*</span></label>' +
+        '<input type="text" class="form-input" id="mkNama" placeholder="Contoh: Sasak" value="' + esc(oldName) + '" autocomplete="off">' +
+        (isEdit ? '<div class="form-hint">⚠️ Mengubah nama akan mengupdate semua data terkait</div>' : '') +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label">🎯 Target Suara <span style="color:var(--muted);font-weight:400;font-size:11px">(opsional)</span></label>' +
+        '<div class="target-input-group">' +
+          '<input type="number" id="mkTarget" placeholder="0" value="' + (oldTarget || '') + '" min="0" inputmode="numeric">' +
+          '<div class="unit">Suara</div>' +
+        '</div>' +
+      '</div>' +
+      (isEdit && realisasi > 0
+        ? '<div class="cfg-info" style="margin-top:0">' + ICONS.info + '<div>Realisasi: <b>' + fmtNum(realisasi) + ' orang</b> (' + fmtNum(verif) + ' sudah pasti)</div></div>'
+        : ''
+      ) +
+      '<div class="confirm-btns" style="margin-top:20px">' +
+        '<button class="btn btn-outline" id="mkCancel" type="button">Batal</button>' +
+        '<button class="btn btn-primary" id="mkSave" type="button">' + ICONS.save + ' Simpan</button>' +
+      '</div>';
+
+    $('mkCancel').addEventListener('click', () => $('modalKampungEdit').classList.remove('show'));
+
+    $('mkSave').addEventListener('click', () => {
+      const nama = $('mkNama').value.trim();
+      const target = parseInt($('mkTarget').value, 10) || 0;
+      if (!nama) { toast('Nama kampung wajib', 'error'); return; }
+      for (let i = 0; i < KAMPUNG_LIST.length; i++) {
+        if (i !== idx && KAMPUNG_LIST[i].toLowerCase() === nama.toLowerCase()) {
+          toast('Nama kampung sudah ada', 'error');
+          return;
+        }
+      }
+      if (isEdit) {
+        const lama = KAMPUNG_LIST[idx];
+        if (lama !== nama) {
+          const btn = $('mkSave');
+          btn.disabled = true;
+          btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Mengubah...';
+          google.script.run
+            .withSuccessHandler(r => {
+              btn.disabled = false;
+              btn.innerHTML = ICONS.save + ' Simpan';
+              if (r.ok) {
+                toast('✅ ' + r.message, 'success');
+                applyConfig(r.data);
+                KAMPUNG_LIST[idx] = nama;
+                if (target > 0) TARGET_PER_KAMPUNG[nama] = target;
+                else delete TARGET_PER_KAMPUNG[nama];
+                if (STATS_PER_KAMPUNG[lama] !== undefined) {
+                  STATS_PER_KAMPUNG[nama] = STATS_PER_KAMPUNG[lama];
+                  delete STATS_PER_KAMPUNG[lama];
+                }
+                if (STATS_VERIFIED_PER_KAMPUNG[lama] !== undefined) {
+                  STATS_VERIFIED_PER_KAMPUNG[nama] = STATS_VERIFIED_PER_KAMPUNG[lama];
+                  delete STATS_VERIFIED_PER_KAMPUNG[lama];
+                }
+                $('modalKampungEdit').classList.remove('show');
+                state.allData = null;
+                state.dashboardCache = null;
+                renderPengaturanUI();
+                fetchAndReplace(true);
+              } else toast('❌ ' + r.message, 'error');
+            })
+            .withFailureHandler(e => {
+              btn.disabled = false;
+              btn.innerHTML = ICONS.save + ' Simpan';
+              toast('Gagal: ' + e.message, 'error');
+            })
+            .apiRenameKampung(lama, nama);
+          return;
+        }
+        if (target > 0) TARGET_PER_KAMPUNG[nama] = target;
+        else delete TARGET_PER_KAMPUNG[nama];
+      } else {
+        KAMPUNG_LIST.push(nama);
+        if (target > 0) TARGET_PER_KAMPUNG[nama] = target;
+      }
+      $('modalKampungEdit').classList.remove('show');
+      renderPengaturanUI();
+      toast('Perubahan lokal. Klik "Simpan Semua Pengaturan" untuk menerapkan.', 'warn');
+    });
+
+    $('modalKampungEdit').classList.add('show');
+  }
+
+  function deleteKampungDraft(idx) {
+    const nama = KAMPUNG_LIST[idx];
+    if (!nama) return;
+    if (KAMPUNG_LIST.length <= 1) {
+      toast('Minimal harus ada 1 kampung', 'error');
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(r => {
+        const count = r.ok ? r.count : 0;
+        let msg = 'Kampung <b>' + esc(nama) + '</b> akan dihapus dari daftar.';
+        if (count > 0) msg += '<br><br>⚠️ Ada <b>' + count + '</b> data pendukung dengan kampung ini. Data tidak akan ikut terhapus, tapi tidak akan muncul di filter sampai Anda rename ulang.';
+        $('confirmTitle').textContent = 'Hapus Kampung?';
+        $('confirmMsg').innerHTML = msg;
+        $('confirmYes').textContent = 'Ya, Hapus';
+        state.confirmCb = () => {
+          closeConfirm();
+          KAMPUNG_LIST.splice(idx, 1);
+          delete TARGET_PER_KAMPUNG[nama];
+          renderPengaturanUI();
+          toast('Kampung dihapus dari daftar. Klik "Simpan Semua Pengaturan" untuk menerapkan.', 'warn');
+        };
+        $('modalConfirm').classList.add('show');
+      })
+      .withFailureHandler(() => {
+        state.confirmCb = () => {
+          closeConfirm();
+          KAMPUNG_LIST.splice(idx, 1);
+          delete TARGET_PER_KAMPUNG[nama];
+          renderPengaturanUI();
+        };
+        $('confirmTitle').textContent = 'Hapus Kampung?';
+        $('confirmMsg').innerHTML = 'Kampung <b>' + esc(nama) + '</b> akan dihapus dari daftar.';
+        $('confirmYes').textContent = 'Ya, Hapus';
+        $('modalConfirm').classList.add('show');
+      })
+      .apiCountKampung(nama);
+  }
+
+  function saveConfigFromUI() {
+    const namaPilkades = $('cfgNamaPilkades').value.trim();
+    const namaKandidat = $('cfgNamaKandidat').value.trim();
+    const targetTotal = parseInt($('cfgTargetTotal').value, 10) || 0;
+    if (!namaPilkades) { toast('Nama Pilkades wajib', 'error'); return; }
+    if (!namaKandidat) { toast('Nama Kandidat wajib', 'error'); return; }
+    if (KAMPUNG_LIST.length === 0) { toast('Minimal 1 kampung', 'error'); return; }
+
+    const btn = $('btnSimpanCfg');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Menyimpan...';
+
+    const payload = {
+      kampungList: KAMPUNG_LIST.slice(),
+      targetPerKampung: Object.assign({}, TARGET_PER_KAMPUNG),
+      targetTotal: targetTotal > 0 ? targetTotal : null,
+      namaPilkades: namaPilkades,
+      namaKandidat: namaKandidat
+    };
+
+    google.script.run
+      .withSuccessHandler(r => {
+        btn.disabled = false;
+        btn.innerHTML = ICONS.save + ' Simpan Semua Pengaturan';
+        if (r.ok) {
+          toast('✅ ' + r.message, 'success');
+          applyConfig(r.data);
+          try { sessionStorage.setItem('pendukung_config', JSON.stringify(r.data)); } catch(e){}
+          state.version = '0|empty';
+          state.dashboardCache = null;
+          fetchAndReplace(true);
+          renderPengaturanUI();
+        } else toast('❌ ' + r.message, 'error');
+      })
+      .withFailureHandler(e => {
+        btn.disabled = false;
+        btn.innerHTML = ICONS.save + ' Simpan Semua Pengaturan';
+        toast('Gagal: ' + e.message, 'error');
+      })
+      .apiSaveConfig(payload);
+  }
+
+  // ============================================================ //
+  // UTILITIES                                                     //
+  // ============================================================ //
+  function emptyState(ico, title, msg) {
+    return '<div class="empty-state">' +
+      '<div class="big">' + ico + '</div>' +
+      '<h3>' + esc(title) + '</h3>' +
+      '<p>' + esc(msg || '') + '</p>' +
+    '</div>';
+  }
+
+  function debounce(fn, ms) {
+    let t;
+    return function() {
+      const a = arguments, ctx = this;
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(ctx, a), ms);
+    };
+  }
+
+  document.querySelectorAll('.modal-bg').forEach(m => {
+    m.addEventListener('click', e => {
+      if (e.target === m) {
+        if (m.id === 'modalEdit') {
+          state.editId = null;
+          state.fotoBase64 = null;
+          state.fotoMime = null;
+          state.editFotoTTDBase64 = null;
+          state.editFotoTTDMime = null;
+          state.editHapusTTD = false;
+        }
+        if (m.id === 'modalDetailWarga') state.detailWargaId = null;
+        if (m.id === 'modalVerifTTD') {
+          state.verifyId = null;
+          state.verifyFotoTTDBase64 = null;
+          state.verifyFotoTTDMime = null;
+        }
+        if (m.id === 'modalCropFoto') { closeCropModal(); return; }
+        if (m.id === 'modalBulkKtp') { closeBulkKtp(); return; }
+        m.classList.remove('show');
+      }
+    });
+  });
+
+  $('bulkKtpClose').addEventListener('click', closeBulkKtp);
+
+  const modalFotoClose = $('modalFotoClose');
+  if (modalFotoClose) {
+    modalFotoClose.addEventListener('click', () => {
+      $('modalFoto').classList.remove('show');
+    });
+  }
+
+  // ⭐ Crop Foto KTP — wiring global (modal ada di luar appContent)
+  $('cropReset').addEventListener('click', () => { if (cropperInstance) cropperInstance.reset(); });
+  $('cropRatioToggle').addEventListener('click', () => {
+    if (!cropperInstance) return;
+    cropIsFreeRatio = !cropIsFreeRatio;
+    cropperInstance.setAspectRatio(cropIsFreeRatio ? NaN : KTP_RATIO);
+    $('cropRatioToggle').classList.toggle('active', cropIsFreeRatio);
+  });
+  $('cropCancelBtn').addEventListener('click', closeCropModal);
+  $('cropConfirmBtn').addEventListener('click', () => {
+    if (!cropperInstance) return;
+    const canvas = cropperInstance.getCroppedCanvas({
+      width: 1000,
+      imageSmoothingEnabled: true,
+      imageSmoothingQuality: 'high'
+    });
+    if (!canvas) { toast('Gagal memproses foto', 'error'); return; }
+    const finalDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+    closeCropModal();
+    finalizeFotoKTP(finalDataUrl);
+  });
+
+  // ============================================================ //
+  // EKSPOR UNTUK pages.js (halaman admin & profil)                //
+  // ============================================================ //
+  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, state: state };
+
+})();

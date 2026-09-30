@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.local
+.vercel
+.DS_Store
+*.log
+mock/dev.log
+
+# Data & ekspor lokal (tidak perlu di repo)
+HASIL_IMPORT/
+*.xlsx
+*.pdf
+*.tsv
+
+# Metadata workspace lokal
+.freebuff/

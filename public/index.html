@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d6e3f">
+  <meta name="format-detection" content="telephone=no">
+  <title>Data Pendukung Pak Emen</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Data Pendukung">
+  <meta name="description" content="Data Pendukung Pilkades — PWA Admin & User">
+
+  <!-- jsPDF + autoTable (untuk export PDF A4) — vendor lokal untuk dukungan offline -->
+  <script src="/vendor/jspdf.umd.min.js"></script>
+  <script src="/vendor/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- ⭐ Cropper.js (crop foto KTP) — vendor lokal -->
+  <link rel="stylesheet" href="/vendor/cropper.min.css">
+  <script src="/vendor/cropper.min.js"></script>
+
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- LOGIN SCREEN                                                  -->
+<!-- ============================================================ -->
+<div id="loginScreen" class="login-wrap">
+  <div class="login-blob"></div>
+  <div class="login-card">
+    <div class="login-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 11l3 3L22 4"/>
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+      </svg>
+    </div>
+    <h1>Data Pendukung</h1>
+    <p class="login-sub" id="loginSub">
+      Pilkades Seruni Mumbul 2026<br>
+      <strong>Pak Muhaimin (Pak Emen)</strong>
+    </p>
+    <div class="login-form">
+      <div class="input-group">
+        <span class="input-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+        </span>
+        <input type="text" id="loginUser" placeholder="Username" autocomplete="username" autocapitalize="none">
+      </div>
+      <div class="input-group">
+        <span class="input-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </span>
+        <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
+      </div>
+      <button id="loginBtn" class="btn btn-primary" type="button">
+        <span class="btn-text">Masuk</span>
+      </button>
+      <div class="login-err" id="loginErr"></div>
+    </div>
+    <p class="login-footer">© 2026 Tim Pak Emen</p>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MAIN APP                                                      -->
+<!-- ============================================================ -->
+<div id="mainApp" style="display:none">
+
+  <!-- ============ HEADER ============ -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="header-avatar">PE</div>
+      <div>
+        <div class="header-title">Data Suara Pak Emen</div>
+        <div class="header-sub" id="headerSub">
+          <span class="sync-dot" id="syncDot"></span>
+          <span id="headerStatus">Pilkades 2026</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Desktop Navigation -->
+    <nav class="desktop-nav">
+      <button class="dnav" data-nav="dashboard" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="9"/>
+          <rect x="14" y="3" width="7" height="5"/>
+          <rect x="14" y="12" width="7" height="9"/>
+          <rect x="3" y="16" width="7" height="5"/>
+        </svg>
+        Dashboard
+      </button>
+      <button class="dnav" data-nav="input" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Input
+      </button>
+      <button class="dnav" data-nav="data" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        Data
+      </button>
+      <button class="dnav" data-nav="pengaturan" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Atur
+      </button>
+    </nav>
+
+    <div style="display:flex;gap:6px;align-items:center">
+      <span id="userBadge" style="font-size:10px;color:var(--text-sec);white-space:nowrap"></span>
+      <button class="dnav" data-nav="users" type="button" title="Kelola User" style="display:none">👥<span style="display:none">User</span></button>
+      <button class="dnav" data-nav="logs" type="button" title="Log Aktivitas" style="display:none">📋<span style="display:none">Log</span></button>
+    </div>
+
+    <button class="logout-btn" id="logoutBtn" title="Keluar" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+        <polyline points="16 17 21 12 16 7"/>
+        <line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- ============ PULL INDICATOR ============ -->
+  <div class="pull-indicator" id="pullIndicator">
+    <div class="spinner" style="width:22px;height:22px;border-width:2px"></div>
+    <span>Memperbarui data...</span>
+  </div>
+
+  <!-- ============ KONTEN UTAMA ============ -->
+  <main class="app-content" id="appContent"></main>
+
+  <!-- ============ FAB SCAN DUPLIKAT ============ -->
+  <button class="fab-scan" id="fabScan" title="Scan Duplikat NIK" type="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      <line x1="11" y1="8" x2="11" y2="14"/>
+      <line x1="8" y1="11" x2="14" y2="11"/>
+    </svg>
+    <span class="fab-badge" id="fabBadge" style="display:none">0</span>
+  </button>
+
+  <!-- ============ BOTTOM NAVIGATION (mobile) ============ -->
+  <nav class="bottom-nav">
+    <button class="nav-item" data-nav="dashboard" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="9"/>
+        <rect x="14" y="3" width="7" height="5"/>
+        <rect x="14" y="12" width="7" height="9"/>
+        <rect x="3" y="16" width="7" height="5"/>
+      </svg>
+      <span>Dashboard</span>
+    </button>
+    <button class="nav-item" data-nav="input" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      <span>Input</span>
+    </button>
+    <button class="nav-item" data-nav="data" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      <span>Data</span>
+    </button>
+    <button class="nav-item" data-nav="pengaturan" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      <span>Atur</span>
+    </button>
+    <button class="nav-item" data-nav="profil" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+        <circle cx="12" cy="7" r="4"/>
+      </svg>
+      <span>Akun</span>
+    </button>
+    <button class="nav-item" data-nav="logs" type="button" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+      </svg>
+      <span>Log</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: FOTO KTP (fullscreen)                                  -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalFoto">
+  <div class="modal-box modal-foto">
+    <button class="modal-close" id="modalFotoClose" type="button" title="Tutup">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"/>
+        <line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+    <img id="modalFotoImg" src="" alt="Foto KTP">
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ⭐ MODAL: CROP FOTO KTP                                        -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalCropFoto">
+  <div class="modal-box modal-crop">
+    <h3 class="crop-title">Sesuaikan Foto KTP</h3>
+    <div class="crop-canvas-wrap">
+      <img id="cropImgEl" src="" alt="">
+    </div>
+    <div class="crop-toolbar">
+      <button type="button" class="crop-tool-btn" id="cropReset" title="Reset">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+      <button type="button" class="crop-tool-btn" id="cropRatioToggle" title="Rasio Bebas / Ukuran KTP">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="6" width="20" height="12" rx="2"/>
+        </svg>
+      </button>
+    </div>
+    <div class="crop-actions">
+      <button type="button" class="btn btn-outline" id="cropCancelBtn">Batal</button>
+      <button type="button" class="btn btn-primary" id="cropConfirmBtn">Gunakan Foto</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ⭐ MODAL: DETAIL WARGA (BARU)                                 -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalDetailWarga">
+  <div class="modal-box modal-detail-warga">
+    <div id="modalDetailWargaContent"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ⭐ MODAL: VERIFIKASI TTD (BARU)                               -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalVerifTTD">
+  <div class="modal-box modal-verif-ttd">
+    <div id="modalVerifTTDContent"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: EDIT DATA                                              -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalEdit">
+  <div class="modal-box modal-edit" id="modalEditContent"></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ⭐ MODAL: DOWNLOAD KTP MASSAL (A4)                            -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalBulkKtp">
+  <div class="modal-box modal-bulk-ktp">
+    <button class="modal-close" id="bulkKtpClose" type="button" title="Tutup">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div id="modalBulkKtpContent"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: KONFIRMASI                                             -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalConfirm">
+  <div class="modal-box modal-confirm">
+    <div class="confirm-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+    </div>
+    <h3 id="confirmTitle">Konfirmasi</h3>
+    <p id="confirmMsg">Apakah Anda yakin?</p>
+    <div class="confirm-btns">
+      <button class="btn btn-outline" id="confirmNo" type="button">Batal</button>
+      <button class="btn btn-danger" id="confirmYes" type="button">Ya, Lanjutkan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: WARNING NIK DUPLIKAT                                   -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalDupWarning">
+  <div class="modal-box modal-dup">
+    <div class="dup-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+    </div>
+    <h3>NIK Sudah Terdaftar!</h3>
+    <p>NIK ini sudah dipakai oleh:</p>
+    <div id="dupList"></div>
+    <p class="dup-hint">Silakan periksa kembali. Setiap NIK hanya boleh terdaftar 1x.</p>
+    <button class="btn btn-primary" id="dupOkBtn" type="button">Mengerti</button>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: SCAN DUPLIKAT NIK                                      -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalScanDup">
+  <div class="modal-box modal-scan-dup">
+    <div class="scan-head">
+      <div class="scan-head-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          <line x1="11" y1="8" x2="11" y2="14"/>
+          <line x1="8" y1="11" x2="14" y2="11"/>
+        </svg>
+      </div>
+      <div class="scan-head-txt">
+        <h3>Scan Duplikat NIK</h3>
+        <p>Periksa NIK yang terdaftar lebih dari 1x</p>
+      </div>
+      <button class="scan-close" id="scanCloseBtn" title="Tutup" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div id="scanResultWrap">
+      <div class="scan-intro">
+        <div class="scan-intro-ico">🔍</div>
+        <h4>Siap Memindai Database</h4>
+        <p>Klik tombol di bawah untuk memeriksa apakah ada NIK yang terdaftar lebih dari sekali di seluruh database.</p>
+        <button class="scan-start-btn" id="btnScanStart" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          Mulai Scan Sekarang
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: EDIT KAMPUNG                                           -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalKampungEdit">
+  <div class="modal-box" id="modalKampungEditContent"></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: GANTI PASSWORD (semua role)                            -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalPass">
+  <div class="modal-box modal-confirm">
+    <h3 style="margin-bottom:4px">Ganti Password</h3>
+    <p style="font-size:12px;color:var(--text-sec);margin-bottom:14px">Password minimal 6 karakter</p>
+    <div class="form-group">
+      <label class="form-label">Password Lama</label>
+      <input type="password" class="form-input" id="pwOld" autocomplete="current-password">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password Baru</label>
+      <input type="password" class="form-input" id="pwNew" autocomplete="new-password">
+    </div>
+    <div class="form-group" style="margin-bottom:16px">
+      <label class="form-label">Ulangi Password Baru</label>
+      <input type="password" class="form-input" id="pwNew2" autocomplete="new-password">
+    </div>
+    <div class="confirm-btns">
+      <button class="btn btn-outline" id="pwCancel" type="button">Batal</button>
+      <button class="btn btn-primary" id="pwSave" type="button">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL: FORM USER (admin — tambah/edit user)                   -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalUser">
+  <div class="modal-box modal-confirm">
+    <h3 id="muTitle" style="margin-bottom:12px">Tambah User</h3>
+    <div class="form-group">
+      <label class="form-label">Username <span class="req">*</span></label>
+      <input type="text" class="form-input" id="muUsername" autocomplete="off" autocapitalize="none" placeholder="3-30 karakter">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nama Lengkap</label>
+      <input type="text" class="form-input" id="muNama" placeholder="Nama tampilan">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Role</label>
+        <select class="form-select" id="muRole">
+          <option value="user">User (lihat saja)</option>
+          <option value="admin">Admin (akses penuh)</option>
+        </select>
+      </div>
+      <div class="form-group" id="muPassGroup">
+        <label class="form-label">Password <span class="req">*</span></label>
+        <input type="password" class="form-input" id="muPass" autocomplete="new-password" placeholder="Minimal 6 karakter">
+      </div>
+    </div>
+    <div class="confirm-btns" style="margin-top:8px">
+      <button class="btn btn-outline" id="muCancel" type="button">Batal</button>
+      <button class="btn btn-primary" id="muSave" type="button">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TOAST NOTIFICATION                                            -->
+<!-- ============================================================ -->
+<div class="toast" id="toast"></div>
+
+<!-- Tombol install PWA (muncul otomatis jika browser mendukung) -->
+<button id="installBtn" class="btn-download install-btn" type="button" style="display:none">⬇️ Install App</button>
+
+<!-- ============================================================ -->
+<!-- HIDDEN FILE INPUTS                                            -->
+<!-- ============================================================ -->
+
+<!-- Untuk form Input: KTP -->
+<input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="galleryInput" accept="image/*" style="display:none">
+
+<!-- Untuk form Edit: KTP -->
+<input type="file" id="editCameraInput" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="editGalleryInput" accept="image/*" style="display:none">
+
+<!-- ⭐ Untuk form Edit: Bukti TTD (BARU) -->
+<input type="file" id="editTTDCameraInput" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="editTTDGalleryInput" accept="image/*" style="display:none">
+
+<!-- ⭐ Untuk form Verifikasi TTD (BARU) -->
+<input type="file" id="verifCameraInput" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="verifGalleryInput" accept="image/*" style="display:none">  <!-- ============================================================ -->
+  <!-- JAVASCRIPT APP                                                -->
+  <!-- ============================================================ -->
+  <script src="/js/api-shim.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/pages.js"></script>
+  <script src="/js/pwa.js"></script>
+
+</body>
+</html>
