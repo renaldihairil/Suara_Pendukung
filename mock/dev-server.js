@@ -47,6 +47,7 @@ function colToIndex(letters) {
 const sheetsApi = {
   spreadsheets: {
     async get() {
+      global.__sheetReads = (global.__sheetReads || 0) + 1;
       return { data: { sheets: Object.keys(mockSheets).map(t => ({ properties: { title: t, sheetId: t } })) } };
     },
     async batchUpdate(opts) {
@@ -61,6 +62,7 @@ const sheetsApi = {
     },
     values: {
       async get(opts) {
+        if (!opts._internal) global.__sheetReads = (global.__sheetReads || 0) + 1;
         const m = String(opts.range).match(/^'(.+)'!(.+)$/);
         const title = m[1];
         const rows = mockSheets[title] || [];
@@ -79,6 +81,15 @@ const sheetsApi = {
           return { data: { values: out } };
         }
         return { data: { values: rows.map(r => r.slice()) } };
+      },
+      async batchGet(opts) {
+        global.__sheetReads = (global.__sheetReads || 0) + 1;
+        const valueRanges = [];
+        for (const range of opts.ranges) {
+          const r = await sheetsApi.spreadsheets.values.get({ range, _internal: true });
+          valueRanges.push({ range, values: r.data.values });
+        }
+        return { data: { valueRanges } };
       },
       async update(opts) {
         const m = String(opts.range).match(/^'(.+)'!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);

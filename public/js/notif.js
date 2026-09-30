@@ -15,7 +15,7 @@
   const ICONS = A.ICONS || {};
   const state = A.state || {};
 
-  const POLL_MS = 20000;
+  const POLL_MS = 40000; // polling notifikasi (hemat kuota baca Google Sheets)
   const N = {
     items: [],
     unread: 0,

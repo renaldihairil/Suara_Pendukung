@@ -4,7 +4,7 @@
   // ============================================================ //
   const RT_LIST = ['001','002','003','004','005','006','007','008','009','010','UMUM'];
   const RT_UMUM = 'UMUM';
-  const POLL_INTERVAL = 15000;
+  const POLL_INTERVAL = 30000; // interval cek perubahan data (hemat kuota baca Google Sheets)
   const PER_PAGE = 15;
 
   let KAMPUNG_LIST = ['Sasak', 'Mandar', 'Barantapen Asri', 'Dames'];
@@ -535,7 +535,7 @@
         }
         fetchAndReplace(silent);
       })
-      .withFailureHandler(e => { state.isFetching = false; setSyncStatus('offline'); })
+      .withFailureHandler(e => { state.isFetching = false; if (!/sibuk/i.test((e && e.message) || '')) setSyncStatus('offline'); })
       .apiGetVersion();
   }
 

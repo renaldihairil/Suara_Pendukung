@@ -107,6 +107,10 @@ Admin mengelola jadwal di **Atur → Agenda & Hari H Pemilihan** (hari pemilihan
 2. (Disarankan) GitHub → *Settings → Secrets and variables → Actions*: tambah `APP_URL` (mis. `https://suara-pendukung.vercel.app`) dan `CRON_SECRET` (sama dengan di Vercel). Workflow `.github/workflows/pengingat.yml` memanggil `/api/cron` tiap 30 menit sehingga jam pengingat tepat.
 - Cadangan: setiap kali ada user membuka aplikasi setelah jam pengingat, server ikut mengirim pengingat yang belum terkirim hari itu. Penanda di sheet `ReminderLog` mencegah pengingat terkirim dobel. Sheet `Agenda`, `ReminderLog` & `UserPrefs` dibuat otomatis.
 
+
+### Kuota Google Sheets API
+Google membatasi **60 permintaan baca per menit** per proyek. Aplikasi sudah dihemat: sheet dibaca berkelompok (`batchGet`), hasil di-cache per instance (notifikasi 20 dtk, preferensi 60 dtk, versi data 15 dtk), cek perubahan data tiap 30 dtk, notifikasi tiap 40 dtk, dan pengecekan struktur sheet hanya sekali per 10 menit. Bila kuota tetap terlampaui, aplikasi menampilkan pesan *"Server sedang sibuk"* dan pulih sendiri dalam ±1 menit (Cloud Console → *APIs & Services → Sheets API → Quotas* bila ingin menaikkan batas).
+
 ## 6. Alur Kerja Git → Deploy
 
 ```bash

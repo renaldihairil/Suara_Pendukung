@@ -366,6 +366,10 @@ module.exports = async (req, res) => {
     }
     return json(res, 200, r);
   } catch (err) {
+    const msg0 = String(err && err.message ? err.message : '');
+    if ((err && err.code === 429) || /quota exceeded|rate.?limit/i.test(msg0)) {
+      return json(res, 429, { ok: false, busy: true, message: 'Server sedang sibuk (batas baca Google Sheets tercapai). Tunggu sekitar 1 menit lalu coba lagi.' });
+    }
     const status = err && err.status ? err.status : 500;
     return json(res, status, { ok: false, message: 'Error: ' + (err && err.message ? err.message : 'unknown') });
   }
