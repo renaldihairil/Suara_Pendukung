@@ -90,6 +90,21 @@ Setiap aksi penting admin otomatis membuat notifikasi untuk user lain, lengkap d
   2. **Android/Desktop (Chrome/Edge/Firefox):** langsung bisa. **iPhone:** aplikasi harus di-*Add to Home Screen* dulu (iOS 16.4+).
 - Tanpa kunci VAPID, notifikasi dalam aplikasi tetap berfungsi; hanya push yang nonaktif.
 
+## 5c. Agenda, Hari H Pemilihan & Pengingat Otomatis
+
+Admin mengelola jadwal di **Atur → Agenda & Hari H Pemilihan** (hari pemilihan, kunjungan, rapat, dll.). Semua user melihat **banner hitung mundur Hari H** dan kartu **Agenda Mendatang** di Dashboard. Setiap agenda dibuat/diubah/dihapus, seluruh user otomatis mendapat notifikasi.
+
+**Pengingat otomatis** (Atur → *Pengingat Otomatis*): jam kirim bisa diatur (default 06:00 WIB).
+- **Hitung mundur Hari H** tiap pagi, mis. *"⏳ 12 hari lagi menuju Pemilihan Kepala Desa … Saat ini: 120 suara PASTI dari 300 pendukung (target 400)"*. Nada pesan berubah mengikuti sisa hari (santai → H-7 "merapatkan barisan" → "Besok Hari H!" → "Hari H telah tiba!" → ucapan terima kasih).
+- **Agenda lain** diingatkan H-1 dan di hari-H agenda.
+- Ada tombol *Kirim contoh ke saya* dan *Kirim pengingat hari ini sekarang*.
+- Notifikasi **suara belum pasti → PASTI** (upload bukti TTD) otomatis dikirim ke seluruh tim beserta total suara PASTI terbaru.
+
+**Agar pengingat terkirim tepat waktu walau tidak ada yang membuka aplikasi** (pilih salah satu/keduanya):
+1. Isi env `CRON_SECRET` di Vercel (+ opsional `APP_TIMEZONE`) lalu redeploy. `vercel.json` sudah memuat Vercel Cron harian 06:00 WIB (`0 23 * * *` UTC; di paket Hobby waktunya bisa bergeser sampai ±1 jam).
+2. (Disarankan) GitHub → *Settings → Secrets and variables → Actions*: tambah `APP_URL` (mis. `https://suara-pendukung.vercel.app`) dan `CRON_SECRET` (sama dengan di Vercel). Workflow `.github/workflows/pengingat.yml` memanggil `/api/cron` tiap 30 menit sehingga jam pengingat tepat.
+- Cadangan: setiap kali ada user membuka aplikasi setelah jam pengingat, server ikut mengirim pengingat yang belum terkirim hari itu. Penanda di sheet `ReminderLog` mencegah pengingat terkirim dobel. Sheet `Agenda` & `ReminderLog` dibuat otomatis.
+
 ## 6. Alur Kerja Git → Deploy
 
 ```bash

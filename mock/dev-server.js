@@ -186,6 +186,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/rpc') return await require('../api/rpc')(req, res);
     if (u.pathname === '/api/auth') return await require('../api/auth')(req, res);
     if (u.pathname === '/api/photo') return await require('../api/photo')(req, res);
+    if (u.pathname === '/api/cron') return await require('../api/cron')(req, res);
     if (u.pathname === '/api/health') return await require('../api/health')(req, res);
     return serveStatic(res, u.pathname);
   } catch (e) {

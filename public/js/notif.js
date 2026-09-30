@@ -62,7 +62,10 @@
     cetak_massal:     ['printer', 'blue'],
     pengaturan:       ['settings', 'slate'],
     kampung:          ['home', 'amber'],
-    user_baru:        ['users', 'blue']
+    user_baru:        ['users', 'blue'],
+    agenda:           ['calendar', 'blue'],
+    agenda_pengingat: ['calendar', 'amber'],
+    countdown:        ['calendar', 'green']
   };
   const meta = t => TYPES[t] || ['info', 'slate'];
 
@@ -141,6 +144,7 @@
     if (n.type === 'user_baru' && A.isAdmin && A.isAdmin()) return A.setPage('users');
     if ((n.type === 'pengaturan' || n.type === 'kampung') && A.isAdmin && A.isAdmin()) return A.setPage('pengaturan');
     if (n.type === 'data_hapus') return A.setPage('data');
+    if (n.type === 'agenda' || n.type === 'agenda_pengingat' || n.type === 'countdown') return A.setPage('dashboard');
     if (state.page !== 'notif') A.setPage('notif');
   }
 

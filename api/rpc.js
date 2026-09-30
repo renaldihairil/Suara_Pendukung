@@ -11,11 +11,13 @@ const drive = require('../lib/gdrive');
 const domain = require('../lib/domain');
 const notif = require('../lib/notif');
 const push = require('../lib/push');
+const reminder = require('../lib/reminder');
 
 const WRITE_ACTIONS = new Set([
   'add', 'update', 'delete', 'verifyWithTTD', 'unverify',
   'togglePrint', 'setPrintBatch', 'saveConfig', 'renameKampung',
-  'saveUsers', 'resetUserPassword', 'updateUser'
+  'saveUsers', 'resetUserPassword', 'updateUser',
+  'saveAgenda', 'deleteAgenda', 'saveReminderSettings', 'reminderTest', 'runReminders'
 ]);
 const ADMIN_ONLY_READ = new Set(['getUsers', 'getLogs']);
 
@@ -159,22 +161,31 @@ module.exports = async (req, res) => {
         r = await store.verifyWithTTD(params);
         if (r.ok) {
           await store.logAksi('VERIFY_TTD', session.username, params.id + ' — bukti TTD diupload');
+          // before.verified = sudah PASTI sebelumnya (upload ulang bukti) → jumlah tidak bertambah
+          const pasti = before ? before.verifiedCount + (before.verified ? 0 : 1) : null;
           await notif.notify({
-            type: 'verifikasi', title: 'Suara PASTI',
-            message: (before ? before.nama + ' di Kampung ' + before.kampung : 'Sebuah data') + ' berhasil diverifikasi oleh ' + actorName + '.',
+            type: 'verifikasi',
+            title: before && before.verified ? 'Bukti TTD diperbarui' : 'Suara PASTI bertambah! ✅',
+            message: (before ? before.nama + ' di Kampung ' + before.kampung : 'Sebuah data') +
+              (before && before.verified ? ' — bukti TTD diperbarui' : ' berubah dari belum pasti menjadi PASTI (bukti TTD diunggah)') +
+              ' oleh ' + actorName + '.' +
+              (pasti != null ? ' Total suara PASTI: ' + pasti + ' dari ' + before.totalCount + ' pendukung.' : ''),
             actor, audience: 'all', dataId: String(params.id), kampung: before ? before.kampung : ''
           });
         }
         break;
       }
+
       case 'unverify': {
         const before = await safe(() => store.getBrief(params.id));
         r = await store.unverifyPendukung(params.id);
         if (r.ok) {
           await store.logAksi('UNVERIFY', session.username, String(params.id));
+          const pasti = before ? Math.max(0, before.verifiedCount - (before.verified ? 1 : 0)) : null;
           await notif.notify({
             type: 'batal_verifikasi', title: 'Verifikasi dibatalkan',
-            message: 'Status ' + (before ? before.nama + ' (Kampung ' + before.kampung + ')' : 'sebuah data') + ' dikembalikan ke belum pasti oleh ' + actorName + '.',
+            message: 'Status ' + (before ? before.nama + ' (Kampung ' + before.kampung + ')' : 'sebuah data') + ' dikembalikan ke belum pasti oleh ' + actorName + '.' +
+              (pasti != null ? ' Total suara PASTI: ' + pasti + ' dari ' + before.totalCount + ' pendukung.' : ''),
             actor, audience: 'all', dataId: String(params.id), kampung: before ? before.kampung : ''
           });
         }
@@ -270,8 +281,55 @@ module.exports = async (req, res) => {
         break;
       }
 
+      /* ============ AGENDA & PENGINGAT ============ */
+      case 'getAgenda':      r = await reminder.getPayload(session); break;
+      case 'saveAgenda': {
+        r = await reminder.saveAgenda(session, params.agenda || params);
+        if (r.ok) {
+          const a = r.agenda;
+          await store.logAksi(r.isNew ? 'AGENDA_ADD' : 'AGENDA_UPDATE', session.username, a.judul + ' / ' + a.tanggal);
+          const days = reminder.diffDays(a.tanggal, reminder.tzNow().date);
+          const sisa = days > 0 ? ' (' + days + ' hari lagi)' : (days === 0 ? ' (hari ini)' : '');
+          await notif.notify(a.jenis === 'pemilihan' ? {
+            type: 'agenda', title: r.isNew ? '🗳️ Hari pemilihan ditetapkan' : '🗳️ Jadwal pemilihan diperbarui',
+            message: a.judul + ': ' + reminder.detailAgenda(a) + sisa + '. Ditetapkan oleh ' + actorName + '.',
+            actor, audience: 'all'
+          } : {
+            type: 'agenda', title: (r.isNew ? 'Agenda baru: ' : 'Agenda diperbarui: ') + a.judul,
+            message: reminder.detailAgenda(a) + sisa + '. Oleh ' + actorName + '.',
+            actor, audience: 'all'
+          });
+        }
+        break;
+      }
+      case 'deleteAgenda': {
+        r = await reminder.deleteAgenda(params.id);
+        if (r.ok) {
+          await store.logAksi('AGENDA_DELETE', session.username, r.agenda.judul + ' / ' + r.agenda.tanggal);
+          await notif.notify({
+            type: 'agenda', title: 'Agenda dibatalkan: ' + r.agenda.judul,
+            message: 'Agenda ' + reminder.tanggalPanjang(r.agenda.tanggal) + ' dihapus oleh ' + actorName + '.',
+            actor, audience: 'all'
+          });
+        }
+        break;
+      }
+      case 'saveReminderSettings': {
+        r = await reminder.saveSettings(params.settings || params);
+        if (r.ok) await store.logAksi('REMINDER_SETTINGS', session.username, 'Jam ' + r.settings.time + (r.settings.enabled ? ' aktif' : ' nonaktif'));
+        break;
+      }
+      case 'reminderTest':   r = await reminder.sendTest(session); break;
+      case 'runReminders': {
+        const res = await reminder.run({ force: true });
+        r = { ok: true, count: res.sent.length, message: res.sent.length ? res.sent.length + ' pengingat dikirim ke semua user' : 'Pengingat hari ini sudah terkirim sebelumnya (atau belum ada agenda)' };
+        break;
+      }
+
       /* ============ NOTIFIKASI & PUSH (semua role) ============ */
-      case 'notifList':      r = await notif.list(session, params); break;
+      case 'notifList':
+        await reminder.maybeRun(); // pemicu pengingat harian (aman dobel)
+        r = await notif.list(session, params); break;
       case 'notifMarkRead':  r = await notif.markRead(session); break;
       case 'pushConfig':     r = { ok: true, enabled: push.isConfigured(), publicKey: push.getPublicKey() }; break;
       case 'pushSubscribe':  r = await push.subscribe(session, params.subscription, req.headers['user-agent']); break;

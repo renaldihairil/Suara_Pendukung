@@ -192,6 +192,8 @@
     // ⭐ ICON SORT
     sortAZ: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h10"/><path d="M3 12h7"/><path d="M3 18h4"/><path d="M17 4v16"/><polyline points="13 16 17 20 21 16"/></svg>',
     sortZA: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h4"/><path d="M3 12h7"/><path d="M3 18h10"/><path d="M17 20V4"/><polyline points="13 8 17 4 21 8"/></svg>',
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
     logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
     // ⭐ ICON status cetak
     printer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>'
@@ -667,6 +669,10 @@
       USER_UPDATE:    ['Data user diperbarui', 'edit', 'blue'],
       USER_RESET_PASS:['Password user direset', 'shield', 'amber'],
       GANTI_PASSWORD: ['Password diganti', 'shield', 'slate'],
+      AGENDA_ADD:     ['Agenda baru ditambahkan', 'calendar', 'blue'],
+      AGENDA_UPDATE:  ['Agenda diperbarui', 'calendar', 'blue'],
+      AGENDA_DELETE:  ['Agenda dihapus', 'trash', 'red'],
+      REMINDER_SETTINGS: ['Pengaturan pengingat diperbarui', 'bell', 'slate'],
       AKSES_DITOLAK:  ['Akses ditolak', 'warn', 'red']
     };
     if (M[a]) return { text: M[a][0], ico: M[a][1], tone: M[a][2] };
@@ -820,6 +826,7 @@
     c.innerHTML =
       pageHead('Selamat Datang, ' + esc(nama) + ' <span class="wave">👋</span>', 'Kelola data pendukung dengan mudah dan cepat.', dateCard) +
       warnHtml +
+      '<div id="agendaBanner"></div>' +
       '<div class="stat-grid stat-grid-main">' +
         totalCard +
         statCard('sc-laki', 'blue', ICONS.male, 'Laki-laki', fmtNum(d.laki), pct(d.laki) + '% dari total') +
@@ -851,6 +858,7 @@
         '</section>' : '') +
       '</div>' +
 
+      '<section class="card agenda-card" id="agendaCard"></section>' +
       '<div class="legend-note">' +
         '<span><i class="lg-dot lg-verified"></i><b>PASTI</b> = TTD + Fotokopi KTP</span>' +
         '<span><i class="lg-dot lg-unverified"></i><b>BELUM</b> = Belum TTD</span>' +
@@ -867,6 +875,7 @@
     const allLogs = $('btnAllLogs');
     if (allLogs) allLogs.addEventListener('click', () => setPage('logs'));
     loadDashLogs(false);
+    if (window.__agenda) window.__agenda.mountDashboard(c);
   }
 
   // ============================================================ //
@@ -3611,6 +3620,7 @@
 
     const btnSimpan = $('btnSimpanCfg');
     if (btnSimpan) btnSimpan.addEventListener('click', saveConfigFromUI);
+    if (isAdmin() && window.__agenda) window.__agenda.mountSettings(c);
   }
 
   function openEditKampungModal(idx) {
