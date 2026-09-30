@@ -26,6 +26,38 @@ const PGW_KEY = 'GANTI_DENGAN_KUNCI_ACAK_MIN_24_KARAKTER';
  * yang dibutuhkan jembatan (Drive, email akun, Dokumen untuk OCR). Setelah itu Terapkan → versi baru.
  */
 // Catatan: fungsi berakhiran "_" bersifat privat dan TIDAK tampil di dropdown; karena itu nama ini tanpa garis bawah.
+// Nomor versi skrip ini — tampil di /api/health (foto.versi) agar jelas versi mana yang sedang ter-deploy.
+const PGW_VERSION = 4;
+
+/**
+ * DIAGNOSIS: jalankan dari editor (pilih pgwDiag → Jalankan → buka "Log eksekusi").
+ * Menunjukkan langkah OCR mana yang bekerja/gagal tanpa perlu foto.
+ */
+function pgwDiag() {
+  Logger.log('versi skrip: ' + PGW_VERSION);
+  const hasDrive = (typeof Drive !== 'undefined') && !!Drive.Files;
+  Logger.log('layanan Drive: ' + hasDrive + ' | create(v3): ' + (hasDrive && !!Drive.Files.create) + ' | insert(v2): ' + (hasDrive && !!Drive.Files.insert) + ' | export: ' + (hasDrive && !!Drive.Files.export));
+  let id = '';
+  try {
+    const meta = { mimeType: 'application/vnd.google-apps.document' };
+    const f = Drive.Files.create ? Drive.Files.create(Object.assign({ name: 'pgw_diag_' + Date.now() }, meta))
+                                 : Drive.Files.insert(Object.assign({ title: 'pgw_diag_' + Date.now() }, meta));
+    id = f.id;
+    Logger.log('1) buat Google Doc: OK');
+    try {
+      const ex = Drive.Files.export(id, 'text/plain');
+      Logger.log('2) export Drive: OK (tipe=' + typeof ex + ', panjang=' + (ex && ex.length !== undefined ? ex.length : '?') + ')');
+    } catch (e) { Logger.log('2) export Drive: GAGAL — ' + e.message); }
+    try { DocumentApp.openById(id).getBody().getText(); Logger.log('3) DocumentApp: OK'); }
+    catch (e) { Logger.log('3) DocumentApp: GAGAL — ' + e.message); }
+  } catch (e) {
+    Logger.log('1) buat Google Doc: GAGAL — ' + e.message);
+  } finally {
+    if (id) { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* abaikan */ } }
+  }
+  Logger.log('selesai');
+}
+
 function pgwAuthorize() {
   DriveApp.getRootFolder();
   const email = Session.getEffectiveUser().getEmail();
@@ -38,14 +70,22 @@ function pgwAuthorize() {
  * TANPA izin Dokumen). Cadangan: DocumentApp (butuh izin Dokumen).
  */
 function pgw_docText_(docId) {
+  let why = '';
   try {
     if (typeof Drive !== 'undefined' && Drive.Files && Drive.Files.export) {      // Drive API v3
       const ex = Drive.Files.export(docId, 'text/plain');
       const t = (typeof ex === 'string') ? ex : (ex && ex.getDataAsString ? ex.getDataAsString() : (ex ? String(ex) : ''));
       if (t && t.trim()) return t;
+      why = 'export Drive kosong (tidak ada teks terbaca)';
+    } else {
+      why = 'Drive.Files.export tidak tersedia (perlu Drive API v3)';
     }
-  } catch (err) { /* lanjut ke cadangan */ }
-  return DocumentApp.openById(docId).getBody().getText();
+  } catch (err) { why = 'export Drive gagal: ' + (err && err.message ? err.message : err); }
+  try {
+    return DocumentApp.openById(docId).getBody().getText();
+  } catch (err2) {
+    throw new Error('OCR gagal — ' + why + ' | DocumentApp: ' + (err2 && err2.message ? err2.message : err2));
+  }
 }
 
 function pgw_out_(o) {
@@ -81,7 +121,7 @@ function pgw_handle_(req) {
         try { who = Session.getEffectiveUser().getEmail(); cap.email = true; } catch (err) { /* izin email belum ada */ }
         try { DocumentApp.openById('izin-cek'); cap.dokumen = true; } catch (err) { cap.dokumen = !/do not have permission to call|Required permissions/i.test(String(err && err.message)); }   // ID palsu → 'No item with the given ID ... or you do not have permission to access it' = izin ADA; izin kurang → 'You do not have permission to call DocumentApp...'
         cap.driveApi = (typeof Drive !== 'undefined' && !!Drive.Files);
-        return pgw_out_({ ok: true, user: who, cap: cap });
+        return pgw_out_({ ok: true, user: who, cap: cap, ver: PGW_VERSION });
       }
 
       case 'upload': {
