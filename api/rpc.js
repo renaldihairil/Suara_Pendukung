@@ -109,11 +109,15 @@ module.exports = async (req, res) => {
           const parsed = ktp.parseKtpText(o.text);
           r = { ok: true, hasText: !!String(o.text).trim(), data: parsed };
         } catch (e) {
-          if (e && e.code === 'OCR_DISABLED') {
-            r = { ok: false, code: 'OCR_DISABLED', message: 'Baca otomatis belum aktif di server (Cloud Vision API). Isi manual.' };
-          } else {
-            r = { ok: false, code: 'OCR_FAILED', message: 'Gagal membaca foto KTP: ' + (e && e.message ? e.message : 'unknown') };
-          }
+          const det = String((e && (e.detail || e.message)) || '').slice(0, 240);
+          const MSG = {
+            OCR_BILLING: 'Baca otomatis butuh billing aktif di project Google Cloud (hubungkan billing / Free Trial), lalu coba lagi.',
+            OCR_DISABLED: 'Cloud Vision API belum aktif di project Google Cloud ini (atau baru diaktifkan — tunggu 1–2 menit).',
+            OCR_DENIED: 'Service Account tidak punya izin memakai Cloud Vision API.'
+          };
+          const code = e && e.code;
+          r = { ok: false, code: MSG[code] ? code : 'OCR_FAILED', detail: det,
+                message: (MSG[code] || 'Gagal membaca foto KTP') + (det ? ' [' + det + ']' : '') };
         }
         break;
       }

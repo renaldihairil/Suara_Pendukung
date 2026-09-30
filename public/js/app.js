@@ -1996,7 +1996,7 @@
 
   function showOcrResult(r, tip) {
     if (!r || !r.ok) {
-      if (r && r.code === 'OCR_DISABLED') setOcrStatus('warn', 'ℹ️ Baca otomatis belum diaktifkan di server. Isi Nama & NIK secara manual.');
+      if (r && /^OCR_(DISABLED|BILLING|DENIED)$/.test(r.code || '')) setOcrStatus('warn', 'ℹ️ ' + esc(r.message) + '<br>Sementara, isi Nama & NIK secara manual.');
       else setOcrStatus('err', '⚠️ ' + esc((r && r.message) || 'Gagal membaca KTP') + '. Isi manual.');
       return;
     }
