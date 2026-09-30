@@ -64,7 +64,7 @@ function pgw_handle_(req) {
         let who = '';
         try { DriveApp.getRootFolder(); cap.drive = true; } catch (err) { /* izin Drive belum ada */ }
         try { who = Session.getEffectiveUser().getEmail(); cap.email = true; } catch (err) { /* izin email belum ada */ }
-        try { DocumentApp.openById('izin-cek'); cap.dokumen = true; } catch (err) { cap.dokumen = !/permission|izin/i.test(String(err && err.message)); }   // ID palsu: error 'tidak ditemukan' = izin ada
+        try { DocumentApp.openById('izin-cek'); cap.dokumen = true; } catch (err) { cap.dokumen = !/do not have permission to call|Required permissions/i.test(String(err && err.message)); }   // ID palsu → 'No item with the given ID ... or you do not have permission to access it' = izin ADA; izin kurang → 'You do not have permission to call DocumentApp...'
         cap.driveApi = (typeof Drive !== 'undefined' && !!Drive.Files);
         return pgw_out_({ ok: true, user: who, cap: cap });
       }
