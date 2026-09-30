@@ -1499,3 +1499,8 @@ body.sel-mode .fab-scan,body.notif-open .fab-scan{display:none!important}
 @media(min-width:640px){#hariHSection .form-row{grid-template-columns:1fr 1fr}.hh-actions{grid-template-columns:1.6fr 1fr}}
 @media(max-width:639px){.hh-count{min-width:92px;padding:10px 12px}.hh-num{font-size:38px}.hh-title{font-size:16.5px}}
 @media(min-width:900px){.hh-banner{padding:24px 28px;gap:26px}.hh-num{font-size:54px}.hh-title{font-size:22px}}
+
+/* pengaturan: tombol simpan per bagian */
+.cfg-actions{margin-top:16px}
+.cfg-actions .btn{width:100%}
+.cfg-info.warn{background:#fffbeb;border-left-color:#f59e0b;color:#92400e}
