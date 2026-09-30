@@ -55,10 +55,18 @@ module.exports = async (req, res) => {
   // Frontend memanggil fungsi ala Apps Script (apiGetList, apiAdd, ...).
   // Normalisasi: buang prefix "api" + lowercase huruf pertama
   // → getList, add, verifyWithTTD, dst. (identik dengan action legacy)
+  // api-shim mengirim pemanggilan dengan argumen POSISI sebagai { args: [...] } → petakan ke nama parameter
+  const ARG_NAMES = {
+    delete: ['id'], unverify: ['id'], togglePrint: ['id', 'dicetak'], setPrintBatch: ['ids', 'dicetak'],
+    renameKampung: ['oldName', 'newName'], countKampung: ['nama'], getFotoBase64: ['fileId']
+  };
   const action = String(params.action || '')
     .replace(/^api/, '')
     .replace(/^./, c => c.toLowerCase());
   if (!action) return json(res, 400, { ok: false, message: 'Action tidak ada' });
+  if (Array.isArray(params.args) && ARG_NAMES[action]) {
+    ARG_NAMES[action].forEach((k, i) => { if (params[k] === undefined) params[k] = params.args[i]; });
+  }
 
   const session = auth.getSessionFromReq(req);
   if (!session) return json(res, 401, { ok: false, message: 'Unauthorized' });
@@ -133,7 +141,7 @@ module.exports = async (req, res) => {
         break;
       }
       case 'saveConfig': {
-        r = await store.saveConfig(params.config);
+        r = await store.saveConfig(params.config || params);
         if (r.ok) await store.logAksi('SAVE_CONFIG', session.username, 'Config disimpan');
         break;
       }

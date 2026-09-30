@@ -14,6 +14,7 @@
   let NAMA_KANDIDAT = 'Pak Muhaimin (Pak Emen)';
   let STATS_PER_KAMPUNG = {};
   let STATS_VERIFIED_PER_KAMPUNG = {};
+  let KAMPUNG_DIRTY = false; // daftar kampung diubah di layar tapi belum disimpan
   let HARI_H = null; // { tanggal, judul, jam, lokasi } — jadwal Hari H pemilihan (atau null)
 
   // ============================================================ //
@@ -382,8 +383,11 @@
   // ============================================================ //
   function applyConfig(cfg) {
     if (!cfg) return;
-    KAMPUNG_LIST = (cfg.kampungList || []).slice();
-    TARGET_PER_KAMPUNG = cfg.targetPerKampung || {};
+    // Jangan timpa perubahan daftar kampung yang belum disimpan (mis. saat sinkron data di latar belakang)
+    if (!KAMPUNG_DIRTY) {
+      KAMPUNG_LIST = (cfg.kampungList || []).slice();
+      TARGET_PER_KAMPUNG = cfg.targetPerKampung || {};
+    }
     TARGET_TOTAL = parseInt(cfg.targetTotal, 10) || 500;
     NAMA_PILKADES = cfg.namaPilkades || 'Pilkades Seruni Mumbul 2026';
     NAMA_KANDIDAT = cfg.namaKandidat || 'Pak Muhaimin (Pak Emen)';
@@ -3491,7 +3495,7 @@
               state.dashboardCache = r.data;
               STATS_PER_KAMPUNG = r.data.perKampung || {};
               STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
-              renderPengaturanUI();
+              rerenderPengaturanKeep(); // jangan hapus isian yang sedang diketik
             }
           })
           .withFailureHandler(() => {})
@@ -3601,6 +3605,7 @@
           '<label class="form-label">Nama Kandidat</label>' +
           '<input type="text" class="form-input" id="cfgNamaKandidat" value="' + esc(NAMA_KANDIDAT) + '" placeholder="Pak Muhaimin (Pak Emen)">' +
         '</div>' +
+        '<div class="cfg-actions"><button class="btn btn-primary" id="btnSaveInfo" type="button">' + ICONS.save + ' Simpan Info Pilkades</button></div>' +
       '</div>' +
 
       '<div class="cfg-section">' +
@@ -3617,6 +3622,7 @@
           '<div class="form-hint">Total target untuk menang Pilkades.</div>' +
         '</div>' +
         '<div class="cfg-info">' + ICONS.info + '<div>Total target per kampung: <b>' + fmtNum(totalTargetKampung) + ' suara</b>. Realisasi: <b>' + fmtNum(totalRealisasi) + ' orang</b> (' + fmtNum(totalVerified) + ' pasti).</div></div>' +
+        '<div class="cfg-actions"><button class="btn btn-primary" id="btnSaveTarget" type="button">' + ICONS.save + ' Simpan Target Suara</button></div>' +
       '</div>' +
 
       '<div class="cfg-section">' +
@@ -3627,6 +3633,8 @@
         '<div>' + kampungCards + '</div>' +
         '<button class="cfg-add-btn" id="btnTambahKampung" type="button">' + ICONS.plus + ' Tambah Kampung Baru</button>' +
         '<div class="cfg-info">' + ICONS.info + '<div>Kalau Anda <b>rename</b> kampung, semua data pendukung dengan kampung lama akan otomatis diupdate ke nama baru.</div></div>' +
+        (KAMPUNG_DIRTY ? '<div class="cfg-info warn">' + ICONS.warn + '<div>Ada perubahan daftar kampung yang <b>belum disimpan</b>. Klik <b>Simpan Daftar Kampung</b> untuk menerapkan.</div></div>' : '') +
+        '<div class="cfg-actions"><button class="btn btn-primary" id="btnSaveKampung" type="button">' + ICONS.save + ' Simpan Daftar Kampung</button></div>' +
       '</div>' +
 
       '<div class="cfg-section" id="hariHSection">' +
@@ -3650,10 +3658,6 @@
           '<button class="btn btn-primary" id="btnSaveHariH" type="button">' + ICONS.save + ' Simpan Hari H</button>' +
           (HARI_H ? '<button class="btn btn-outline" id="btnClearHariH" type="button">Hapus Hari H</button>' : '') +
         '</div>' +
-      '</div>' +
-
-      '<div class="cfg-save-bar">' +
-        '<button class="cfg-save-btn" id="btnSimpanCfg" type="button">' + ICONS.save + ' Simpan Semua Pengaturan</button>' +
       '</div>';
 
     document.querySelectorAll('[data-act="edit-kampung"]').forEach(btn => {
@@ -3673,8 +3677,9 @@
     const btnTambah = $('btnTambahKampung');
     if (btnTambah) btnTambah.addEventListener('click', () => openEditKampungModal(-1));
 
-    const btnSimpan = $('btnSimpanCfg');
-    if (btnSimpan) btnSimpan.addEventListener('click', saveConfigFromUI);
+    const btnInfo = $('btnSaveInfo'); if (btnInfo) btnInfo.addEventListener('click', saveInfoPilkades);
+    const btnTarget = $('btnSaveTarget'); if (btnTarget) btnTarget.addEventListener('click', saveTargetSuara);
+    const btnKamp = $('btnSaveKampung'); if (btnKamp) btnKamp.addEventListener('click', saveDaftarKampung);
     const btnHH = $('btnSaveHariH');
     if (btnHH) btnHH.addEventListener('click', () => saveHariH(false));
     const btnHHc = $('btnClearHariH');
@@ -3696,7 +3701,7 @@
           if (state.cfgCache) state.cfgCache.hariH = HARI_H;
           state.dashboardCache = null;
           toast(clear ? '🗑️ Hari H dihapus' : '✅ Hari H tersimpan — tampil di Dashboard', 'success');
-          renderPengaturanUI();
+          rerenderPengaturanKeep(clear ? ['hhJudul', 'hhTanggal', 'hhJam', 'hhLokasi'] : ['hhJudul', 'hhTanggal', 'hhJam', 'hhLokasi']);
         } else toast('❌ ' + (r.message || 'Gagal menyimpan'), 'error');
       })
       .withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal: ' + e.message, 'error'); })
@@ -3764,6 +3769,7 @@
               btn.innerHTML = ICONS.save + ' Simpan';
               if (r.ok) {
                 toast('✅ ' + r.message, 'success');
+                KAMPUNG_DIRTY = false;
                 applyConfig(r.data);
                 KAMPUNG_LIST[idx] = nama;
                 if (target > 0) TARGET_PER_KAMPUNG[nama] = target;
@@ -3798,8 +3804,9 @@
         if (target > 0) TARGET_PER_KAMPUNG[nama] = target;
       }
       $('modalKampungEdit').classList.remove('show');
+      KAMPUNG_DIRTY = true;
       renderPengaturanUI();
-      toast('Perubahan lokal. Klik "Simpan Semua Pengaturan" untuk menerapkan.', 'warn');
+      toast('Perubahan belum tersimpan. Klik "Simpan Daftar Kampung" untuk menerapkan.', 'warn');
     });
 
     $('modalKampungEdit').classList.add('show');
@@ -3824,8 +3831,9 @@
           closeConfirm();
           KAMPUNG_LIST.splice(idx, 1);
           delete TARGET_PER_KAMPUNG[nama];
+          KAMPUNG_DIRTY = true;
           renderPengaturanUI();
-          toast('Kampung dihapus dari daftar. Klik "Simpan Semua Pengaturan" untuk menerapkan.', 'warn');
+          toast('Kampung dihapus dari daftar. Klik "Simpan Daftar Kampung" untuk menerapkan.', 'warn');
         };
         $('modalConfirm').classList.add('show');
       })
@@ -3834,6 +3842,7 @@
           closeConfirm();
           KAMPUNG_LIST.splice(idx, 1);
           delete TARGET_PER_KAMPUNG[nama];
+          KAMPUNG_DIRTY = true;
           renderPengaturanUI();
         };
         $('confirmTitle').textContent = 'Hapus Kampung?';
@@ -3844,46 +3853,84 @@
       .apiCountKampung(nama);
   }
 
-  function saveConfigFromUI() {
-    const namaPilkades = $('cfgNamaPilkades').value.trim();
-    const namaKandidat = $('cfgNamaKandidat').value.trim();
-    const targetTotal = parseInt($('cfgTargetTotal').value, 10) || 0;
-    if (!namaPilkades) { toast('Nama Pilkades wajib', 'error'); return; }
-    if (!namaKandidat) { toast('Nama Kandidat wajib', 'error'); return; }
-    if (KAMPUNG_LIST.length === 0) { toast('Minimal 1 kampung', 'error'); return; }
+  // ---------- Simpan pengaturan PER BAGIAN (masing-masing section punya tombol sendiri) ---------- //
+  const CFG_INPUT_IDS = ['cfgNamaPilkades', 'cfgNamaKandidat', 'cfgTargetTotal', 'hhJudul', 'hhTanggal', 'hhJam', 'hhLokasi'];
 
-    const btn = $('btnSimpanCfg');
-    btn.disabled = true;
-    btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Menyimpan...';
+  // Render ulang halaman pengaturan TANPA menghapus isian bagian lain yang sedang diketik
+  function rerenderPengaturanKeep(exceptIds) {
+    const snap = {};
+    CFG_INPUT_IDS.forEach(id => { const el = $(id); if (el) snap[id] = el.value; });
+    renderPengaturanUI();
+    CFG_INPUT_IDS.forEach(id => {
+      const el = $(id);
+      if (el && snap[id] !== undefined && (!exceptIds || exceptIds.indexOf(id) === -1)) el.value = snap[id];
+    });
+  }
 
-    const payload = {
-      kampungList: KAMPUNG_LIST.slice(),
-      targetPerKampung: Object.assign({}, TARGET_PER_KAMPUNG),
-      targetTotal: targetTotal > 0 ? targetTotal : null,
-      namaPilkades: namaPilkades,
-      namaKandidat: namaKandidat
-    };
+  function persistCfgCache() {
+    try { sessionStorage.setItem('pendukung_config', JSON.stringify(state.cfgCache || {})); } catch (e) {}
+  }
 
+  function saveConfigPart(payload, btnId, label, onOk) {
+    const btn = $(btnId);
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Menyimpan...';
+    }
+    const restore = () => { if (btn) { btn.disabled = false; btn.innerHTML = orig; } };
     google.script.run
       .withSuccessHandler(r => {
-        btn.disabled = false;
-        btn.innerHTML = ICONS.save + ' Simpan Semua Pengaturan';
-        if (r.ok) {
-          toast('✅ ' + r.message, 'success');
-          applyConfig(r.data);
-          try { sessionStorage.setItem('pendukung_config', JSON.stringify(r.data)); } catch(e){}
-          state.version = '0|empty';
-          state.dashboardCache = null;
-          fetchAndReplace(true);
-          renderPengaturanUI();
-        } else toast('❌ ' + r.message, 'error');
+        restore();
+        if (!r.ok) { toast('❌ ' + (r.message || 'Gagal menyimpan'), 'error'); return; }
+        state.cfgCache = state.cfgCache || {};
+        onOk(r.data || {});
+        persistCfgCache();
+        state.version = '0|empty';
+        state.dashboardCache = null;
+        toast('✅ ' + label + ' tersimpan', 'success');
       })
-      .withFailureHandler(e => {
-        btn.disabled = false;
-        btn.innerHTML = ICONS.save + ' Simpan Semua Pengaturan';
-        toast('Gagal: ' + e.message, 'error');
-      })
+      .withFailureHandler(e => { restore(); toast('Gagal: ' + e.message, 'error'); })
       .apiSaveConfig(payload);
+  }
+
+  function saveInfoPilkades() {
+    const namaPilkades = $('cfgNamaPilkades').value.trim();
+    const namaKandidat = $('cfgNamaKandidat').value.trim();
+    if (!namaPilkades) { toast('Nama Pilkades wajib diisi', 'error'); $('cfgNamaPilkades').focus(); return; }
+    if (!namaKandidat) { toast('Nama Kandidat wajib diisi', 'error'); $('cfgNamaKandidat').focus(); return; }
+    saveConfigPart({ namaPilkades, namaKandidat }, 'btnSaveInfo', 'Info Pilkades', d => {
+      NAMA_PILKADES = d.namaPilkades || namaPilkades;
+      NAMA_KANDIDAT = d.namaKandidat || namaKandidat;
+      state.cfgCache.namaPilkades = NAMA_PILKADES;
+      state.cfgCache.namaKandidat = NAMA_KANDIDAT;
+      const sub = $('loginSub'); if (sub) sub.textContent = NAMA_PILKADES;
+      document.title = 'Suara Pendukung — ' + NAMA_KANDIDAT;
+      rerenderPengaturanKeep(['cfgNamaPilkades', 'cfgNamaKandidat']);
+    });
+  }
+
+  function saveTargetSuara() {
+    const targetTotal = parseInt($('cfgTargetTotal').value, 10) || 0;
+    if (targetTotal <= 0) { toast('Target total harus lebih dari 0', 'error'); $('cfgTargetTotal').focus(); return; }
+    saveConfigPart({ targetTotal }, 'btnSaveTarget', 'Target Suara', d => {
+      TARGET_TOTAL = d.targetTotal || targetTotal;
+      state.cfgCache.targetTotal = TARGET_TOTAL;
+      rerenderPengaturanKeep(['cfgTargetTotal']);
+    });
+  }
+
+  function saveDaftarKampung() {
+    if (KAMPUNG_LIST.length === 0) { toast('Minimal 1 kampung', 'error'); return; }
+    saveConfigPart({ kampungList: KAMPUNG_LIST.slice(), targetPerKampung: Object.assign({}, TARGET_PER_KAMPUNG) }, 'btnSaveKampung', 'Daftar Kampung', d => {
+      KAMPUNG_LIST = (d.kampungList || KAMPUNG_LIST).slice();
+      TARGET_PER_KAMPUNG = d.targetPerKampung || TARGET_PER_KAMPUNG;
+      state.cfgCache.kampungList = KAMPUNG_LIST.slice();
+      state.cfgCache.targetPerKampung = Object.assign({}, TARGET_PER_KAMPUNG);
+      KAMPUNG_DIRTY = false;
+      fetchAndReplace(true);
+      rerenderPengaturanKeep();
+    });
   }
 
   // ============================================================ //
