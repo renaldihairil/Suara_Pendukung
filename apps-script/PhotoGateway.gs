@@ -27,7 +27,7 @@ const PGW_KEY = 'GANTI_DENGAN_KUNCI_ACAK_MIN_24_KARAKTER';
  */
 // Catatan: fungsi berakhiran "_" bersifat privat dan TIDAK tampil di dropdown; karena itu nama ini tanpa garis bawah.
 // Nomor versi skrip ini — tampil di /api/health (foto.versi) agar jelas versi mana yang sedang ter-deploy.
-const PGW_VERSION = 5;
+const PGW_VERSION = 6;
 
 /**
  * DIAGNOSIS: jalankan dari editor (pilih pgwDiag → Jalankan → buka "Log eksekusi").
@@ -71,18 +71,24 @@ function pgwAuthorize() {
  * Hasil bisa berupa string atau Blob → selalu dikembalikan sebagai string.
  */
 function pgw_export_(docId) {
-  let lastErr = null;
-  const tries = [function () { return Drive.Files.export(docId, 'text/plain', { alt: 'media' }); },
-                 function () { return Drive.Files.export(docId, 'text/plain'); }];
-  for (let i = 0; i < tries.length; i++) {
-    try {
-      const ex = tries[i]();
-      if (typeof ex === 'string') return ex;
-      if (ex && ex.getDataAsString) return ex.getDataAsString();
-      return ex ? String(ex) : '';
-    } catch (err) { lastErr = err; }
+  const errs = [];
+  const tries = [
+    ['alt=media', function () { return Drive.Files.export(docId, 'text/plain', { alt: 'media' }); }],
+    ['tanpa opsi', function () { return Drive.Files.export(docId, 'text/plain'); }]
+  ];
+  // Doc hasil OCR kadang belum siap tepat setelah dibuat → ulangi sekali setelah jeda singkat
+  for (let round = 0; round < 2; round++) {
+    if (round) Utilities.sleep(1500);
+    for (let i = 0; i < tries.length; i++) {
+      try {
+        const ex = tries[i][1]();
+        if (typeof ex === 'string') return ex;
+        if (ex && ex.getDataAsString) return ex.getDataAsString();
+        return ex ? String(ex) : '';
+      } catch (err) { errs.push(tries[i][0] + ': ' + (err && err.message ? err.message : err)); }
+    }
   }
-  throw lastErr;
+  throw new Error(errs.join(' ; '));
 }
 
 /**

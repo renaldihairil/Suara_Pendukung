@@ -72,7 +72,7 @@ Di project Apps Script lama (yang terikat ke spreadsheet yang sama):
 7. **Deploy**: **Terapkan → Kelola deployment** → pensil pada Web App → **Versi: Versi baru** → **Terapkan**.
    Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: **Siapa saja***. Salin **URL Web App** (berakhiran `/exec`).
 8. **Vercel** → Environment Variables: `APPSCRIPT_PHOTO_URL` = URL tadi, `APPSCRIPT_PHOTO_KEY` = isi `PGW_KEY` → **Redeploy**.
-9. Buka `/api/health`: bagian `foto` harus `"ok":true`, `versi` sama dengan nomor terbaru skrip (mis. `5`; bila `lama…` berarti deployment masih memakai kode lama) dan `izin` tidak ada yang `false` untuk `drive`.
+9. Buka `/api/health`: bagian `foto` harus `"ok":true`, `versi` sama dengan nomor terbaru skrip (mis. `6`; bila `lama…` berarti deployment masih memakai kode lama) dan `izin` tidak ada yang `false` untuk `drive`.
 10. **Diagnosis OCR tanpa foto**: di editor Apps Script jalankan fungsi `pgwDiag` lalu buka **Log eksekusi** — menampilkan langkah mana yang bekerja/gagal (buat Doc → export Drive → DocumentApp).
 
 ## 4. Variabel Environment (Vercel)
