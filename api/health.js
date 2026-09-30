@@ -1,36 +1,47 @@
 'use strict';
 /* ============================================================
- * /api/health — cek cepat deploy & koneksi Google Sheets.
- * Dipakai saat setup untuk memastikan Service Account valid.
+ * /api/health — cek cepat deploy: Google Sheets + Jembatan Foto (Apps Script).
+ * Dipakai saat setup/diagnosis; tidak membuka data pribadi.
  * ============================================================ */
 module.exports = async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+  const out = { ok: true, time: new Date().toISOString() };
   try {
     const sheets = require('../lib/gsheets');
-    // Baca 1 baris pertama sheet Config sebagai uji koneksi
-    const rows = await sheets.readSheet(sheets.SHEET_CONFIG);
-    // Cek Drive (foto): mode & apakah akun bisa dipakai
-    const g = require('../lib/gauth').getGoogle();
-    const gd = require('../lib/gdrive');
-    let drive = { mode: gd.gwCfg() ? 'appscript' : g.driveMode, ok: false };
-    try {
-      if (gd.gwCfg()) {
-        const pong = await gd.gwCall({ op: 'ping' });
-        drive.ok = true; drive.akun = pong.user;
-      } else {
-      const about = await g.drive.about.get({ fields: 'user(emailAddress),storageQuota(limit,usage)' });
-      drive.ok = true;
-      drive.akun = about.data && about.data.user && about.data.user.emailAddress;
-      const q = about.data && about.data.storageQuota;
-      if (q) { drive.limitGB = q.limit ? +(q.limit / 1e9).toFixed(1) : null; drive.usedGB = q.usage ? +(q.usage / 1e9).toFixed(2) : 0; }
-      if (g.driveMode !== 'oauth' && q && q.limit !== undefined && Number(q.limit) === 0) { drive.ok = false; drive.catatan = 'Service Account tanpa kuota Drive — foto tak bisa diunggah. Isi GOOGLE_OAUTH_* (README 5d).'; }
-      }
-    } catch (e) { drive.catatan = String(e && e.message || e).slice(0, 200); }
-    res.statusCode = 200;
-    res.end(JSON.stringify({ ok: true, spreadsheet: true, drive, configRows: Math.max(0, rows.length - 1), time: new Date().toISOString() }));
+    const rows = await sheets.readSheet(sheets.SHEET_CONFIG, { fresh: true });
+    out.spreadsheet = true;
+    out.configRows = Math.max(0, rows.length - 1);
   } catch (e) {
     res.statusCode = 500;
-    res.end(JSON.stringify({ ok: false, message: e && e.message ? e.message : 'unknown', time: new Date().toISOString() }));
+    return res.end(JSON.stringify({ ok: false, spreadsheet: false, message: e && e.message ? e.message : 'unknown', time: out.time }));
   }
+
+  // Foto & baca KTP lewat Jembatan Apps Script
+  const gd = require('../lib/gdrive');
+  const foto = { mode: 'appscript', ok: false };
+  if (!gd.gwCfg()) {
+    foto.catatan = 'APPSCRIPT_PHOTO_URL / APPSCRIPT_PHOTO_KEY belum diisi di Vercel (lihat README)';
+  } else {
+    try {
+      const pong = await gd.gwCall({ op: 'ping' });
+      const cap = pong.cap || {};
+      foto.akun = pong.user || undefined;
+      foto.izin = cap;
+      // upload/baca foto butuh: drive. OCR butuh: drive + dokumen + driveApi.
+      foto.ok = cap.drive !== false;
+      const kurang = [];
+      if (cap.drive === false) kurang.push('izin Drive');
+      if (cap.dokumen === false) kurang.push('izin Dokumen (OCR)');
+      if (cap.driveApi === false) kurang.push('layanan Drive API (OCR)');
+      if (cap.email === false) kurang.push('izin email (opsional)');
+      if (kurang.length) foto.catatan = 'Belum lengkap: ' + kurang.join(', ') + ' — lihat README "Izin Apps Script"';
+    } catch (e) {
+      foto.catatan = String(e && e.message || e).slice(0, 240);
+    }
+  }
+  out.foto = foto;
+  out.ocr = { penyedia: [gd.gwCfg() ? 'appscript' : null, process.env.OCRSPACE_API_KEY ? 'ocrspace' : null].filter(Boolean) };
+  res.statusCode = 200;
+  res.end(JSON.stringify(out));
 };

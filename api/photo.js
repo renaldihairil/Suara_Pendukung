@@ -28,7 +28,8 @@ module.exports = async (req, res) => {
     const buf = Buffer.from(f.base64, 'base64');
     res.statusCode = 200;
     res.setHeader('Content-Type', f.mime);
-    res.setHeader('Cache-Control', 'no-store');
+    // id file Drive tidak pernah berubah (foto baru = id baru) → aman di-cache di perangkat PENGGUNA saja
+    res.setHeader('Cache-Control', download ? 'no-store' : 'private, max-age=86400, immutable');
     if (download) res.setHeader('Content-Disposition', 'attachment; filename="foto-' + id + '.jpg"');
     res.end(buf);
   } catch (e) {

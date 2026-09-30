@@ -59,9 +59,14 @@ function pgw_handle_(req) {
 
     switch (req.op) {
       case 'ping': {
+        // Laporkan izin yang sudah/ belum diberikan agar mudah didiagnosis dari /api/health
+        const cap = { drive: false, email: false, dokumen: false, driveApi: false };
         let who = '';
-        try { who = Session.getEffectiveUser().getEmail(); } catch (err) { who = '(email tidak dapat dibaca; izin belum diberikan)'; }
-        return pgw_out_({ ok: true, user: who });
+        try { DriveApp.getRootFolder(); cap.drive = true; } catch (err) { /* izin Drive belum ada */ }
+        try { who = Session.getEffectiveUser().getEmail(); cap.email = true; } catch (err) { /* izin email belum ada */ }
+        try { DocumentApp.openById('izin-cek'); cap.dokumen = true; } catch (err) { cap.dokumen = !/permission|izin/i.test(String(err && err.message)); }   // ID palsu: error 'tidak ditemukan' = izin ada
+        cap.driveApi = (typeof Drive !== 'undefined' && !!Drive.Files);
+        return pgw_out_({ ok: true, user: who, cap: cap });
       }
 
       case 'upload': {

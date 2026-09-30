@@ -112,57 +112,10 @@ const sheetsApi = {
   }
 };
 
-const driveApi = {
-  about: { async get() { return { data: { user: { emailAddress: 'mock@example.com' }, storageQuota: { limit: String(15e9), usage: '1000000' } } }; } },
-  files: {
-    async list(opts) {
-      const nameMatch = String(opts.q || '').match(/name="([^"]+)"/);
-      if (nameMatch) {
-        for (const f of Object.values(mockFiles)) {
-          if (f.isFolder && f.name === nameMatch[1]) return { data: { files: [{ id: f.id, name: f.name }] } };
-        }
-      }
-      return { data: { files: [] } };
-    },
-    async create(opts) {
-      // Uji: Service Account tanpa kuota Drive (perilaku Google asli); OAuth akun pemilik tidak kena
-      if (process.env.MOCK_DRIVE_NOQUOTA && !process.env.GOOGLE_OAUTH_REFRESH_TOKEN && !(opts.requestBody && opts.requestBody.mimeType === 'application/vnd.google-apps.folder')) {
-        const e = new Error('Service Accounts do not have storage quota. Leverage shared drives or use OAuth delegation.'); e.code = 403; throw e;
-      }
-      const id = 'F' + (++fileSeq);
-      if (opts.requestBody && opts.requestBody.mimeType === 'application/vnd.google-apps.folder') {
-        mockFiles[id] = { id, isFolder: true, name: opts.requestBody.name };
-      } else {
-        // Meniru googleapis asli: media.body WAJIB stream (Buffer → "part.body.pipe is not a function")
-        const body = opts.media && opts.media.body;
-        if (!body || typeof body.pipe !== 'function') throw new TypeError('part.body.pipe is not a function');
-        const chunks = [];
-        for await (const c of body) chunks.push(Buffer.from(c));
-        mockFiles[id] = {
-          id,
-          name: (opts.requestBody && opts.requestBody.name) || 'file',
-          mime: (opts.media && opts.media.mimeType) || 'image/jpeg',
-          bytes: Buffer.concat(chunks)
-        };
-      }
-      return { data: { id } };
-    },
-    async update(opts) { return { data: { id: opts.fileId } }; },
-    async get(opts) {
-      const f = mockFiles[opts.fileId];
-      if (!f || f.isFolder) { const e = new Error('File not found'); e.code = 404; throw e; }
-      const buf = f.bytes;
-      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-      return { data: ab, headers: { 'content-type': f.mime } };
-    }
-  }
-};
-
 const fakeGoogleapis = {
   google: {
-    auth: { JWT: function () {}, OAuth2: function () { this.setCredentials = function () {}; this.isOAuth = true; } },
-    sheets: () => sheetsApi,
-    drive: () => driveApi
+    auth: { JWT: function () {} },
+    sheets: () => sheetsApi
   }
 };
 
@@ -198,6 +151,8 @@ function serveStatic(res, urlPath) {
 }
 
 /* ---------- Mock jembatan foto Apps Script (Web App doPost) ---------- */
+process.env.APPSCRIPT_PHOTO_URL = process.env.APPSCRIPT_PHOTO_URL || 'https://script.google.com/macros/s/MOCK/exec';
+process.env.APPSCRIPT_PHOTO_KEY = process.env.APPSCRIPT_PHOTO_KEY || 'kunci-uji-minimal-24-karakter-x';
 (function () {
   const realFetch = global.fetch;
   const KEY = 'kunci-uji-minimal-24-karakter-x';
@@ -207,7 +162,7 @@ function serveStatic(res, urlPath) {
       const req = JSON.parse((opt && opt.body) || '{}');
       const out = o => ({ ok: true, status: 200, text: async () => JSON.stringify(o) });
       if (req.key !== KEY) return out({ ok: false, message: 'Kunci salah' });
-      if (req.op === 'ping') return out({ ok: true, user: 'pemilik@example.com' });
+      if (req.op === 'ping') return out({ ok: true, user: 'pemilik@example.com', cap: { drive: true, email: true, dokumen: !process.env.MOCK_GW_NO_DOCS, driveApi: !process.env.MOCK_GW_NO_DRIVE } });
       if (req.op === 'upload') {
         const id = 'G' + (++fileSeq);
         mockFiles[id] = { id, name: req.name, mime: req.mime, bytes: Buffer.from(req.base64, 'base64'), folder: req.folder };

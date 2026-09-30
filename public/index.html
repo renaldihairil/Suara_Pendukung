@@ -21,15 +21,17 @@
   <!-- Font (fallback ke font sistem bila offline) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <!-- dimuat tanpa memblokir tampilan pertama (font sistem dipakai dulu, Inter menyusul) -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"></noscript>
 
-  <!-- jsPDF + autoTable (untuk export PDF A4) — vendor lokal untuk dukungan offline -->
-  <script src="/vendor/jspdf.umd.min.js"></script>
-  <script src="/vendor/jspdf.plugin.autotable.min.js"></script>
+  <!-- jsPDF + autoTable (export PDF A4) — vendor lokal; defer = tidak memblokir tampilan pertama (baru dipakai saat unduh PDF) -->
+  <script src="/vendor/jspdf.umd.min.js" defer></script>
+  <script src="/vendor/jspdf.plugin.autotable.min.js" defer></script>
 
   <!-- ⭐ Cropper.js (crop foto KTP) — vendor lokal -->
   <link rel="stylesheet" href="/vendor/cropper.min.css">
-  <script src="/vendor/cropper.min.js"></script>
+  <script src="/vendor/cropper.min.js" defer></script>
 
   <link rel="stylesheet" href="/css/style.css">
 </head>
