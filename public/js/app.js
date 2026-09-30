@@ -82,7 +82,14 @@
   function applyRoleUI() {
     const admin = isAdmin();
     const staff = canOperate();
-    document.querySelectorAll('[data-nav="input"]').forEach(el => { el.style.display = staff ? '' : 'none'; });
+    // Menu bawah (mobile): tombol + menonjol hanya untuk Super Admin (5 menu). Operator memakai tombol
+    // mengambang kanan bawah (#fabInput) supaya menu bawahnya 3 item sejajar & rapi.
+    document.querySelectorAll('[data-nav="input"]').forEach(el => {
+      const inBottom = !!el.closest('.bottom-nav');
+      el.style.display = (inBottom ? admin : staff) ? '' : 'none';
+    });
+    const fabIn = $('fabInput');
+    if (fabIn) fabIn.classList.toggle('show', staff && !admin);
     document.querySelectorAll('[data-nav="pengaturan"]').forEach(el => { el.style.display = admin ? '' : 'none'; });
     // Nav admin: Kelola User & Log Aktivitas (+ judul grup-nya)
     document.querySelectorAll('[data-nav="users"], [data-nav="logs"], .admin-only').forEach(el => {
@@ -432,6 +439,7 @@
   }
 
   function renderCurrentPage() {
+    document.body.classList.toggle('page-input', state.page === 'input');
     if (state.page === 'dashboard') renderDashboard();
     else if (state.page === 'input') renderInput();
     else if (state.page === 'data') renderData();
@@ -3639,6 +3647,8 @@
   // ============================================================ //
   // SCAN DUPLIKAT                                                 //
   // ============================================================ //
+  $('fabInput').addEventListener('click', () => { if (canOperate()) setPage('input'); });
+
   $('fabScan').addEventListener('click', () => {
     state.scanResult = null;
     renderScanIntro();

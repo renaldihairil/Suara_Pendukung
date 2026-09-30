@@ -1586,3 +1586,11 @@ input.auto-fill{background:#f0fdf4 !important;border-color:#86efac !important}
 .role-hint{font-size:12px;line-height:1.55;color:var(--text);background:rgba(59,130,246,.08);border-left:3px solid #3b82f6;border-radius:8px;padding:8px 10px;margin:2px 0 6px}
 @media (min-width:900px){.role-guide{grid-template-columns:repeat(3,1fr)}}
 .person-verify-tag.role-op{background:#fef3c7;color:#92400e}
+
+/* ===== Tombol Input mengambang (Operator, mobile) — posisi sama dengan Scan Duplikat milik Super Admin ===== */
+.fab-input{position:fixed;right:16px;bottom:calc(98px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;background:var(--primary);color:#fff;display:none;align-items:center;justify-content:center;box-shadow:0 10px 24px rgba(37,99,235,.42),0 4px 12px rgba(15,36,71,.18);z-index:90;transition:transform .2s,box-shadow .2s,opacity .2s}
+.fab-input.show{display:flex}
+.fab-input svg{width:26px;height:26px}
+.fab-input:active{transform:scale(.94)}
+body.sel-mode .fab-input,body.notif-open .fab-input,body.page-input .fab-input,body.kcam-open .fab-input{display:none!important}
+@media(min-width:900px){.fab-input,.fab-input.show{display:none!important}}
