@@ -861,17 +861,15 @@
       pageHead('Selamat Datang, ' + esc(nama) + ' <span class="wave">👋</span>', 'Kelola data pendukung dengan mudah dan cepat.', dateCard) +
       warnHtml +
       hariHBannerHtml(d.hariH) +
-      '<div class="stat-grid stat-grid-main">' +
+      // 7 kartu dalam satu grid: Total melebar 2 kolom (desktop: Total+Laki-laki+Perempuan | 4 kartu status; HP: Total 1 baris, sisanya 2 per baris)
+      '<div class="stat-grid">' +
         totalCard +
         statCard('sc-laki', 'blue', ICONS.male, 'Laki-laki', fmtNum(d.laki), pct(d.laki) + '% dari total') +
         statCard('sc-perempuan', 'pink', ICONS.female, 'Perempuan', fmtNum(d.perempuan), pct(d.perempuan) + '% dari total') +
         statCard('verified-card', 'green', ICONS.shield, 'Suara PASTI', fmtNum(totalVerified), pctVerified + '% sudah verifikasi TTD') +
-      '</div>' +
-      '<div class="stat-grid stat-grid-sub">' +
         statCard('unverified-card', 'slate', ICONS.clock, 'Suara Belum Pasti', fmtNum(totalUnverified), pctUnverified + '% belum verifikasi') +
         statCard('printed-card', 'indigo', ICONS.printer, 'Sudah Dicetak', fmtNum(totalDicetak), pctDicetak + '% sudah print out') +
         statCard('unprinted-card', 'amber', ICONS.printer, 'Belum Dicetak', fmtNum(totalBelumCetak), pctBelumCetak + '% belum print out') +
-        statCard('sc-kampung', 'violet', ICONS.home, 'Jumlah Kampung', fmtNum(list.length), 'wilayah terdata') +
       '</div>' +
 
       '<div class="dash-cols' + (isAdmin() ? '' : ' single') + '">' +
