@@ -235,6 +235,17 @@
           '<div class="cfg-hero-stat"><div class="lbl">Akses</div><div class="val" style="font-size:16px">' + (admin ? 'Penuh' : 'Lihat') + '</div></div>' +
         '</div>' +
       '</div>' +
+      (admin ?
+      '<div class="cfg-section mobile-only">' +
+        '<div class="cfg-section-head">' +
+          '<div class="cfg-section-ico">' + (ICONS.settings || '') + '</div>' +
+          '<div><div class="cfg-section-title">Pengelolaan</div><div class="cfg-section-sub">Menu khusus admin</div></div>' +
+        '</div>' +
+        '<div class="menu-list">' +
+          '<button class="menu-item" data-goto="users" type="button"><span class="mi-ico">' + (ICONS.users || '') + '</span><span class="mi-txt">Kelola User</span><span class="mi-chev">' + (ICONS.next || '›') + '</span></button>' +
+          '<button class="menu-item" data-goto="logs" type="button"><span class="mi-ico">' + (ICONS.card || '') + '</span><span class="mi-txt">Log Aktivitas</span><span class="mi-chev">' + (ICONS.next || '›') + '</span></button>' +
+        '</div>' +
+      '</div>' : '') +
       '<div class="cfg-section">' +
         '<div class="cfg-section-head">' +
           '<div class="cfg-section-ico">🔑</div>' +
@@ -250,8 +261,14 @@
         '</div>' +
         '<div class="cfg-info">' + (ICONS.info || '') + '<div>Android/Chrome: menu ⋮ → <b>Install app</b>. iPhone/Safari: Share → <b>Add to Home Screen</b>. Desktop: ikon install di address bar.</div></div>' +
         '<button class="cfg-add-btn" id="btnInstallHere" type="button" style="display:none">⬇️ Install App Sekarang</button>' +
-      '</div>';
+      '</div>' +
+      '<button class="logout-card mobile-only" id="btnProfilLogout" type="button">' + (ICONS.close || '') + ' Keluar Aplikasi</button>';
 
+    c.querySelectorAll('[data-goto]').forEach(btn => {
+      btn.addEventListener('click', () => { if (A.setPage) A.setPage(btn.getAttribute('data-goto')); });
+    });
+    const lo = $('btnProfilLogout');
+    if (lo) lo.addEventListener('click', () => { const b = $('logoutBtn'); if (b) b.click(); });
     $('btnGantiPw').addEventListener('click', () => {
       $('pwOld').value = ''; $('pwNew').value = ''; $('pwNew2').value = '';
       $('modalPass').classList.add('show');
