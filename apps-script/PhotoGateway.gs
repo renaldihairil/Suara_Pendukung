@@ -22,10 +22,11 @@
 const PGW_KEY = 'GANTI_DENGAN_KUNCI_ACAK_MIN_24_KARAKTER';
 
 /**
- * JALANKAN SEKALI dari editor (pilih fungsi ini di dropdown → Jalankan) untuk memberi izin
+ * JALANKAN SEKALI dari editor (pilih fungsi pgwAuthorize di dropdown → Jalankan) untuk memberi izin
  * yang dibutuhkan jembatan (Drive, email akun, Dokumen untuk OCR). Setelah itu Terapkan → versi baru.
  */
-function pgw_authorize_() {
+// Catatan: fungsi berakhiran "_" bersifat privat dan TIDAK tampil di dropdown; karena itu nama ini tanpa garis bawah.
+function pgwAuthorize() {
   DriveApp.getRootFolder();
   const email = Session.getEffectiveUser().getEmail();
   if (typeof DocumentApp !== 'undefined') DocumentApp.getActiveDocument;   // memicu izin Dokumen (untuk OCR)
