@@ -71,45 +71,12 @@ mock/            Dev server lokal dengan Google di-mock (untuk QA tanpa kredensi
 - **iPhone (Safari)**: Share → **Add to Home Screen**.
 - App shell tampil saat offline (halaman offline ramah); data/foto tetap butuh internet.
 
-## 5b. Notifikasi (dalam aplikasi + Push)
+## 5b. Hari H Pemilihan
 
-Setiap aksi penting admin otomatis membuat notifikasi untuk user lain, lengkap dengan nama data dan kampungnya, contoh:
-*"Siti Rahayu ditambahkan di Kampung Sasak (RT 002) oleh Administrator."*
-
-| Aksi | Dikirim ke |
-|---|---|
-| Tambah / ubah / hapus data | semua user (kecuali pelaku) |
-| Verifikasi / batal verifikasi, tandai cetak (satuan & massal) | semua user |
-| Ubah pengaturan / nama kampung | semua user |
-| User baru ditambahkan | admin saja |
-
-- **Scan duplikat NIK (admin):** tombol kaca pembesar kuning di kanan bawah layar.
-- **Dalam aplikasi:** ikon lonceng di pojok atas (badge jumlah belum dibaca), panel notifikasi, dan halaman *Notifikasi*. Klik notifikasi membuka detail datanya. Memakai 3 sheet yang dibuat otomatis: `Notifikasi`, `NotifState`, `PushSubs`.
-- **Push (muncul walau aplikasi ditutup):** tiap user mengaktifkannya sendiri: lewat popup ajakan saat pertama kali login di perangkat, atau kapan saja lewat kartu *Notifikasi Push* di halaman **Akun** (profil) dan halaman Notifikasi. Butuh kunci VAPID:
-  1. `npm run vapid` → salin hasilnya ke Vercel → Settings → Environment Variables (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`), lalu redeploy.
-  2. **Android/Desktop (Chrome/Edge/Firefox):** langsung bisa. **iPhone:** aplikasi harus di-*Add to Home Screen* dulu (iOS 16.4+).
-- Tanpa kunci VAPID, notifikasi dalam aplikasi tetap berfungsi; hanya push yang nonaktif.
-
-## 5c. Agenda, Hari H Pemilihan & Pengingat Otomatis
-
-Admin mengelola jadwal di **Atur → Agenda & Hari H Pemilihan** (hari pemilihan, kunjungan, rapat, dll.). Semua user melihat **banner hitung mundur Hari H** dan kartu **Agenda Mendatang** di Dashboard. Setiap agenda dibuat/diubah/dihapus, seluruh user otomatis mendapat notifikasi.
-
-**Zona waktu:** bawaan **WITA**. Tiap user punya zona sendiri di halaman **Akun → Zona Waktu**: *Otomatis* (mengikuti perangkat; terdeteksi WIB/WITA/WIT) atau dipilih manual. Admin menentukan *zona acuan* jam agenda di Atur; user di zona lain melihat konversinya, mis. `08:00 WITA (07:00 WIB)`.
-
-**Pengingat otomatis** (Atur → *Pengingat Otomatis*): jam kirim bisa diatur (default 06:00) dan berlaku menurut **waktu setempat tiap user** — user WIB, WITA, dan WIT masing-masing menerimanya di pagi harinya.
-- **Hitung mundur Hari H** tiap pagi, mis. *"⏳ 12 hari lagi menuju Pemilihan Kepala Desa … Saat ini: 120 suara PASTI dari 300 pendukung (target 400)"*. Nada pesan berubah mengikuti sisa hari (santai → H-7 "merapatkan barisan" → "Besok Hari H!" → "Hari H telah tiba!" → ucapan terima kasih).
-- **Agenda lain** diingatkan H-1 dan di hari-H agenda.
-- Ada tombol *Kirim contoh ke saya* dan *Kirim pengingat hari ini sekarang*.
-- Notifikasi **suara belum pasti → PASTI** (upload bukti TTD) otomatis dikirim ke seluruh tim beserta total suara PASTI terbaru.
-
-**Agar pengingat terkirim tepat waktu walau tidak ada yang membuka aplikasi** (pilih salah satu/keduanya):
-1. Isi env `CRON_SECRET` di Vercel (+ opsional `APP_TIMEZONE`) lalu redeploy. `vercel.json` memuat Vercel Cron harian (`0 23 * * *` UTC ≈ 06:00 WIB; di paket Hobby waktunya bisa bergeser sampai ±1 jam).
-2. (Disarankan) GitHub → *Settings → Secrets and variables → Actions*: tambah `APP_URL` (mis. `https://suara-pendukung.vercel.app`) dan `CRON_SECRET` (sama dengan di Vercel). Workflow `.github/workflows/pengingat.yml` memanggil `/api/cron` tiap 30 menit sehingga jam pengingat tepat.
-- Cadangan: setiap kali ada user membuka aplikasi setelah jam pengingat, server ikut mengirim pengingat yang belum terkirim hari itu. Penanda di sheet `ReminderLog` mencegah pengingat terkirim dobel. Sheet `Agenda`, `ReminderLog` & `UserPrefs` dibuat otomatis.
-
+Admin menetapkan jadwal di **Atur → Hari H Pemilihan** (nama acara, tanggal, jam & lokasi opsional). Seluruh tim melihat **banner hitung mundur** ("12 hari lagi") di Dashboard; warnanya berubah oranye saat H-7 dan hijau di hari-H. Jadwal disimpan di sheet `Config` (tanpa sheet tambahan) dan memakai zona **WITA**. Tidak ada notifikasi/pengingat otomatis.
 
 ### Kuota Google Sheets API
-Google membatasi **60 permintaan baca per menit** per proyek. Aplikasi sudah dihemat: sheet dibaca berkelompok (`batchGet`), hasil di-cache per instance (notifikasi 20 dtk, preferensi 60 dtk, versi data 15 dtk), cek perubahan data tiap 30 dtk, notifikasi tiap 40 dtk, dan pengecekan struktur sheet hanya sekali per 10 menit. Bila kuota tetap terlampaui, aplikasi menampilkan pesan *"Server sedang sibuk"* dan pulih sendiri dalam ±1 menit (Cloud Console → *APIs & Services → Sheets API → Quotas* bila ingin menaikkan batas).
+Google membatasi **60 permintaan baca per menit** per proyek. Aplikasi sudah dihemat: sheet dibaca berkelompok (`batchGet`), versi data di-cache 15 dtk, cek perubahan data tiap 30 dtk, dan pengecekan struktur sheet hanya sekali per 10 menit. Bila kuota tetap terlampaui, aplikasi menampilkan pesan *"Server sedang sibuk"* dan pulih sendiri dalam ±1 menit (Cloud Console → *APIs & Services → Sheets API → Quotas* bila ingin menaikkan batas).
 
 ## 6. Alur Kerja Git → Deploy
 

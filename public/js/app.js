@@ -14,6 +14,7 @@
   let NAMA_KANDIDAT = 'Pak Muhaimin (Pak Emen)';
   let STATS_PER_KAMPUNG = {};
   let STATS_VERIFIED_PER_KAMPUNG = {};
+  let HARI_H = null; // { tanggal, judul, jam, lokasi } — jadwal Hari H pemilihan (atau null)
 
   // ============================================================ //
   // STATE                                                         //
@@ -110,7 +111,6 @@
       startPolling();
       if (isAdmin()) checkDupBadge();
       watchModals();
-      if (window.__notif) window.__notif.start();
     });
   }
 
@@ -365,7 +365,6 @@
     else if (state.page === 'users') renderUsers();
     else if (state.page === 'logs') renderLogs();
     else if (state.page === 'profil') renderProfil();
-    else if (state.page === 'notif') { if (window.renderNotif) window.renderNotif(); }
   }
 
   function isStillOn(token, page) {
@@ -388,6 +387,7 @@
     TARGET_TOTAL = parseInt(cfg.targetTotal, 10) || 500;
     NAMA_PILKADES = cfg.namaPilkades || 'Pilkades Seruni Mumbul 2026';
     NAMA_KANDIDAT = cfg.namaKandidat || 'Pak Muhaimin (Pak Emen)';
+    HARI_H = cfg.hariH || null;
     state.configLoaded = true;
     state.cfgCache = cfg;
     const sub = $('loginSub');
@@ -467,13 +467,8 @@
       });
   }
 
-  $('logoutBtn').addEventListener('click', async () => {
+  $('logoutBtn').addEventListener('click', () => {
     stopPolling();
-    if (window.__notif) {
-      // lepas langganan push perangkat ini dari akun sebelum sesi berakhir
-      try { await window.__notif.onLogout(); } catch (e) {}
-      window.__notif.stop();
-    }
     try {
       ['pendukung_auth', 'pendukung_user', 'pendukung_cache_v1', 'pendukung_cache_at', 'pendukung_cache_version', 'pendukung_config'].forEach(k => sessionStorage.removeItem(k));
     } catch (e) {}
@@ -669,10 +664,7 @@
       USER_UPDATE:    ['Data user diperbarui', 'edit', 'blue'],
       USER_RESET_PASS:['Password user direset', 'shield', 'amber'],
       GANTI_PASSWORD: ['Password diganti', 'shield', 'slate'],
-      AGENDA_ADD:     ['Agenda baru ditambahkan', 'calendar', 'blue'],
-      AGENDA_UPDATE:  ['Agenda diperbarui', 'calendar', 'blue'],
-      AGENDA_DELETE:  ['Agenda dihapus', 'trash', 'red'],
-      REMINDER_SETTINGS: ['Pengaturan pengingat diperbarui', 'bell', 'slate'],
+      HARI_H:         ['Jadwal Hari H pemilihan diperbarui', 'calendar', 'blue'],
       AKSES_DITOLAK:  ['Akses ditolak', 'warn', 'red']
     };
     if (M[a]) return { text: M[a][0], ico: M[a][1], tone: M[a][2] };
@@ -752,6 +744,47 @@
     '</div>';
   }
 
+  // ---------- Hari H pemilihan: hitung mundur di dashboard (tanpa notifikasi) ---------- //
+  const HH_ZONE = 'Asia/Makassar';   // jadwal & tanggal dashboard memakai WITA
+  const HH_LABEL = 'WITA';
+  const hhDayNum = ymd => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || '')); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000 : NaN; };
+  const hhToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: HH_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const hhFmtLong = ymd => new Date(hhDayNum(ymd) * 86400000).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+  function hhMessage(days) {
+    const pick = arr => arr[Math.abs(days) % arr.length];
+    if (days < 0) return 'Pemilihan telah dilaksanakan. Terima kasih atas kerja keras, doa, dan semangat seluruh tim. 🙏';
+    if (days === 0) return 'Hari H telah tiba! Bismillah — ajak keluarga & tetangga datang ke TPS dan gunakan hak pilihnya. 💪';
+    if (days === 1) return 'Besok Hari H. Istirahat cukup, pastikan logistik siap, dan ingatkan semua pendukung datang ke TPS.';
+    if (days <= 7) return pick(['Tinggal ' + days + ' hari lagi! Saatnya merapatkan barisan dan memastikan semua pendukung tahu lokasi TPS-nya.', 'H-' + days + '! Fokus ke pendukung yang masih belum pasti — satu kunjungan bisa menambah satu suara.', 'Sebentar lagi! Jaga kekompakan dan semangat tim. 🤝']);
+    if (days <= 30) return pick(['Waktu terus berjalan — ' + days + ' hari lagi. Yuk percepat verifikasi suara dan kunjungi warga di tiap kampung.', 'Setiap hari berarti. Hari ini, sapa satu keluarga lagi dan pastikan suaranya PASTI.', 'Tetap semangat, tetap santun, tetap konsisten! 🌱']);
+    return pick(['Masih ' + days + ' hari. Waktu yang cukup untuk membangun kepercayaan warga — mulai dari hal kecil, konsisten tiap hari.', 'Semangat, Tim Pendukung! Mari kerja cerdas dan ikhlas. ☀️']);
+  }
+
+  function hariHBannerHtml(h) {
+    if (!h) {
+      if (!isAdmin()) return '';
+      return '<section class="hh-banner hh-empty"><div class="hh-emoji">🗳️</div>' +
+        '<div class="hh-body"><div class="hh-kicker">HARI PEMILIHAN</div><div class="hh-title">Tetapkan tanggal Hari H pemilihan</div>' +
+        '<div class="hh-msg">Tanggal Hari H akan tampil sebagai hitung mundur di Dashboard untuk seluruh tim.</div></div>' +
+        '<button type="button" class="hh-btn" id="hhSet">Atur sekarang</button></section>';
+    }
+    const days = Math.round(hhDayNum(h.tanggal) - hhDayNum(hhToday()));
+    let big, unit;
+    if (days < 0) { big = '✔'; unit = 'Selesai'; }
+    else if (days === 0) { big = 'H'; unit = 'HARI INI!'; }
+    else if (days === 1) { big = '1'; unit = 'hari lagi — besok!'; }
+    else { big = String(days); unit = 'hari lagi'; }
+    return '<section class="hh-banner' + (days <= 0 ? ' hh-today' : days <= 7 ? ' hh-soon' : '') + '">' +
+      '<div class="hh-count"><div class="hh-num">' + esc(big) + '</div><div class="hh-unit">' + esc(unit) + '</div></div>' +
+      '<div class="hh-body"><div class="hh-kicker">🗳️ ' + esc(String(h.judul || 'HARI PEMILIHAN').toUpperCase()) + '</div>' +
+        '<div class="hh-title">' + esc(hhFmtLong(h.tanggal)) + (h.jam ? ' • ' + esc(h.jam) + ' ' + HH_LABEL : '') + '</div>' +
+        (h.lokasi ? '<div class="hh-loc">📍 ' + esc(h.lokasi) + '</div>' : '') +
+        '<div class="hh-msg">' + esc(hhMessage(days)) + '</div></div>' +
+      (isAdmin() ? '<button type="button" class="hh-link" id="hhManage">Ubah jadwal ' + ICONS.arrowRight + '</button>' : '') +
+    '</section>';
+  }
+
   function renderDashboardData() {
     const c = $('appContent');
     const d = state.dashboardCache;
@@ -802,7 +835,7 @@
       warnHtml = '<div class="alert alert-danger">' + ICONS.warn + '<div>Ada <b>' + d.unknownKampung + '</b> kampung di database yang tidak ada di daftar pengaturan. Buka <b>Atur</b> untuk memperbarui.</div></div>';
     }
 
-    const zn = window.__agenda ? window.__agenda.zone() : { iana: 'Asia/Makassar', label: 'WITA' };
+    const zn = { iana: HH_ZONE, label: HH_LABEL };
     const now = new Date();
     const tgl = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: zn.iana });
     const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: zn.iana }).replace('.', ':');
@@ -827,7 +860,7 @@
     c.innerHTML =
       pageHead('Selamat Datang, ' + esc(nama) + ' <span class="wave">👋</span>', 'Kelola data pendukung dengan mudah dan cepat.', dateCard) +
       warnHtml +
-      '<div id="agendaBanner"></div>' +
+      hariHBannerHtml(d.hariH) +
       '<div class="stat-grid stat-grid-main">' +
         totalCard +
         statCard('sc-laki', 'blue', ICONS.male, 'Laki-laki', fmtNum(d.laki), pct(d.laki) + '% dari total') +
@@ -859,7 +892,6 @@
         '</section>' : '') +
       '</div>' +
 
-      '<section class="card agenda-card" id="agendaCard"></section>' +
       '<div class="legend-note">' +
         '<span><i class="lg-dot lg-verified"></i><b>PASTI</b> = TTD + Fotokopi KTP</span>' +
         '<span><i class="lg-dot lg-unverified"></i><b>BELUM</b> = Belum TTD</span>' +
@@ -876,7 +908,8 @@
     const allLogs = $('btnAllLogs');
     if (allLogs) allLogs.addEventListener('click', () => setPage('logs'));
     loadDashLogs(false);
-    if (window.__agenda) window.__agenda.mountDashboard(c);
+    const hhSet = $('hhSet'); if (hhSet) hhSet.addEventListener('click', () => setPage('pengaturan'));
+    const hhMan = $('hhManage'); if (hhMan) hhMan.addEventListener('click', () => setPage('pengaturan'));
   }
 
   // ============================================================ //
@@ -3598,6 +3631,29 @@
         '<div class="cfg-info">' + ICONS.info + '<div>Kalau Anda <b>rename</b> kampung, semua data pendukung dengan kampung lama akan otomatis diupdate ke nama baru.</div></div>' +
       '</div>' +
 
+      '<div class="cfg-section" id="hariHSection">' +
+        '<div class="cfg-section-head">' +
+          '<div class="cfg-section-ico">' + ICONS.calendar + '</div>' +
+          '<div><div class="cfg-section-title">Hari H Pemilihan</div><div class="cfg-section-sub">Tanggal pemilihan untuk hitung mundur di Dashboard</div></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div class="form-group"><label class="form-label" for="hhJudul">Nama acara</label>' +
+            '<input type="text" class="form-input" id="hhJudul" maxlength="80" value="' + esc(HARI_H ? HARI_H.judul : 'Pemilihan Kepala Desa') + '" placeholder="Pemilihan Kepala Desa"></div>' +
+          '<div class="form-group"><label class="form-label" for="hhTanggal">Tanggal <span class="req">*</span></label>' +
+            '<input type="date" class="form-input" id="hhTanggal" value="' + esc(HARI_H ? HARI_H.tanggal : '') + '"></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div class="form-group"><label class="form-label" for="hhJam">Jam <span class="hh-opt">(opsional, ' + HH_LABEL + ')</span></label>' +
+            '<input type="time" class="form-input" id="hhJam" value="' + esc(HARI_H ? HARI_H.jam : '') + '"></div>' +
+          '<div class="form-group"><label class="form-label" for="hhLokasi">Lokasi <span class="hh-opt">(opsional)</span></label>' +
+            '<input type="text" class="form-input" id="hhLokasi" maxlength="120" value="' + esc(HARI_H ? HARI_H.lokasi : '') + '" placeholder="Mis. TPS Balai Desa"></div>' +
+        '</div>' +
+        '<div class="hh-actions">' +
+          '<button class="btn btn-primary" id="btnSaveHariH" type="button">' + ICONS.save + ' Simpan Hari H</button>' +
+          (HARI_H ? '<button class="btn btn-outline" id="btnClearHariH" type="button">Hapus Hari H</button>' : '') +
+        '</div>' +
+      '</div>' +
+
       '<div class="cfg-save-bar">' +
         '<button class="cfg-save-btn" id="btnSimpanCfg" type="button">' + ICONS.save + ' Simpan Semua Pengaturan</button>' +
       '</div>';
@@ -3621,8 +3677,34 @@
 
     const btnSimpan = $('btnSimpanCfg');
     if (btnSimpan) btnSimpan.addEventListener('click', saveConfigFromUI);
-    if (isAdmin() && window.__agenda) window.__agenda.mountSettings(c);
+    const btnHH = $('btnSaveHariH');
+    if (btnHH) btnHH.addEventListener('click', () => saveHariH(false));
+    const btnHHc = $('btnClearHariH');
+    if (btnHHc) btnHHc.addEventListener('click', () => saveHariH(true));
   }
+
+  function saveHariH(clear) {
+    const payload = clear
+      ? { tanggal: '' }
+      : { judul: $('hhJudul').value.trim(), tanggal: $('hhTanggal').value, jam: $('hhJam').value, lokasi: $('hhLokasi').value.trim() };
+    if (!clear && !payload.tanggal) { toast('Pilih tanggal Hari H', 'error'); $('hhTanggal').focus(); return; }
+    const btn = $(clear ? 'btnClearHariH' : 'btnSaveHariH');
+    if (btn) btn.disabled = true;
+    google.script.run
+      .withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        if (r.ok) {
+          HARI_H = r.hariH || null;
+          if (state.cfgCache) state.cfgCache.hariH = HARI_H;
+          state.dashboardCache = null;
+          toast(clear ? '🗑️ Hari H dihapus' : '✅ Hari H tersimpan — tampil di Dashboard', 'success');
+          renderPengaturanUI();
+        } else toast('❌ ' + (r.message || 'Gagal menyimpan'), 'error');
+      })
+      .withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal: ' + e.message, 'error'); })
+      .apiSaveHariH({ hariH: payload });
+  }
+
 
   function openEditKampungModal(idx) {
     const isEdit = idx >= 0;
