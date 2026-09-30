@@ -24,7 +24,7 @@
     timer: null,
     panelOpen: false,
     tab: 'all',         // 'all' | 'unread'  (di halaman)
-    push: { supported: false, enabled: false, permission: 'default', subscribed: false, busy: false, publicKey: '' },
+    push: { ready: false, supported: false, enabled: false, permission: 'default', subscribed: false, busy: false, publicKey: '' },
     started: false
   };
 
@@ -226,7 +226,9 @@
   function pushCardHtml() {
     const p = N.push;
     let body;
-    if (!p.enabled) {
+    if (!p.ready) {
+      body = '<div class="nt-card-note">Memeriksa status notifikasi…</div>';
+    } else if (!p.enabled) {
       body = '<div class="nt-card-note">Push belum diaktifkan oleh server. Admin perlu mengisi kunci <code>VAPID_*</code> di pengaturan hosting.</div>';
     } else if (!p.supported) {
       body = '<div class="nt-card-note">Browser ini belum mendukung notifikasi push. Di iPhone: buka lewat Safari → <b>Bagikan</b> → <b>Tambah ke Layar Utama</b>, lalu buka aplikasinya dari layar utama.</div>';
@@ -272,6 +274,7 @@
       '</section>';
     renderListInPage();
     bindPage(c);
+    bindPush($('ntPushWrap'));
     fetchNotifs({ silent: true, skipPage: false }).then(() => {
       // setelah daftar tampil sebentar, tandai terbaca (sorotan "baru" tetap terlihat pada render ini)
       setTimeout(() => { if (state.page === 'notif' && state.pageToken === token) markAllRead(true); }, 2500);
@@ -286,14 +289,29 @@
     }));
     const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
     on('ntPageMarkAll', () => markAllRead());
-    on('ntPushToggle', () => (N.push.subscribed ? disablePush() : enablePush()));
-    on('ntPushTest', sendTest);
   }
 
+  function bindPush(root) {
+    if (!root) return;
+    const toggle = root.querySelector('#ntPushToggle');
+    if (toggle) toggle.addEventListener('click', () => (N.push.subscribed ? disablePush() : enablePush()));
+    const test = root.querySelector('#ntPushTest');
+    if (test) test.addEventListener('click', sendTest);
+  }
+
+  // Kartu pengaturan push bisa tampil di halaman Notifikasi dan halaman Profil
+  const PUSH_MOUNTS = ['ntPushWrap', 'profilPushCard'];
   function refreshPushUi() {
-    const w = $('ntPushWrap');
-    if (w && state.page === 'notif') { w.innerHTML = pushCardHtml(); bindPage($('appContent')); }
+    PUSH_MOUNTS.forEach(id => {
+      const el = $(id);
+      if (el) { el.innerHTML = pushCardHtml(); bindPush(el); }
+    });
     if (N.panelOpen) renderPanel();
+  }
+  function mountPushCard(id) {
+    if (PUSH_MOUNTS.indexOf(id) === -1) PUSH_MOUNTS.push(id);
+    const el = $(id);
+    if (el) { el.innerHTML = pushCardHtml(); bindPush(el); }
   }
 
   /* ---------------- Web Push ---------------- */
@@ -322,6 +340,7 @@
       p.publicKey = (cfg && cfg.publicKey) || '';
     } catch (e) { p.enabled = false; }
     p.subscribed = false;
+    p.ready = true;
     if (p.supported && p.enabled) {
       const reg = await getRegistration();
       if (reg) {
@@ -338,6 +357,7 @@
       }
     }
     refreshPushUi();
+    schedulePrompt();
   }
 
   async function subscribeNow(reg) {
@@ -380,6 +400,7 @@
         await rpc('apiPushUnsubscribe', { endpoint }).catch(() => {});
       }
       p.subscribed = false;
+      setPromptRec({ never: true });
       toast('Notifikasi push dinonaktifkan', 'success');
     } catch (e) {
       toast('Gagal menonaktifkan: ' + (e && e.message ? e.message : e), 'error');
@@ -403,6 +424,74 @@
       const sub = reg ? await reg.pushManager.getSubscription() : null;
       if (sub) await rpc('apiPushUnsubscribe', { endpoint: sub.endpoint });
     } catch (e) { /* abaikan */ }
+  }
+
+  /* ---------------- popup ajakan mengaktifkan push ---------------- */
+  const PROMPT_KEY = 'pkd_push_prompt_v1';
+  const LATER_MS = 3 * 24 * 3600 * 1000; // "Nanti saja" → tanya lagi setelah 3 hari
+  const curUser = () => String((state.user && state.user.username) || '').toLowerCase();
+  function promptAll() { try { return JSON.parse(localStorage.getItem(PROMPT_KEY) || '{}'); } catch (e) { return {}; } }
+  function getPromptRec() { return promptAll()[curUser()] || {}; }
+  function setPromptRec(rec) {
+    try { const all = promptAll(); all[curUser()] = Object.assign({}, all[curUser()] || {}, rec); localStorage.setItem(PROMPT_KEY, JSON.stringify(all)); } catch (e) { /* mode privat */ }
+  }
+  const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+
+  function closePrompt() {
+    const m = $('modalPushPrompt');
+    if (m) m.classList.remove('show');
+  }
+
+  function showPrompt(kind) {
+    let m = $('modalPushPrompt');
+    if (!m) { m = document.createElement('div'); m.className = 'modal-bg'; m.id = 'modalPushPrompt'; document.body.appendChild(m); }
+    const art = '<div class="pp-art"><span class="pp-ring r1"></span><span class="pp-ring r2"></span><div class="pp-bell">' + BELL + '</div></div>';
+    if (kind === 'ios') {
+      m.innerHTML = '<div class="modal-box push-prompt">' + art +
+        '<h3>Pasang aplikasi dulu</h3>' +
+        '<p>Di iPhone/iPad, notifikasi hanya bisa aktif jika aplikasi dipasang ke layar utama.</p>' +
+        '<ol class="pp-steps"><li>Ketuk tombol <b>Bagikan</b> <span class="pp-share">⎙</span> di Safari</li><li>Pilih <b>Tambah ke Layar Utama</b></li><li>Buka aplikasi dari layar utama, lalu aktifkan notifikasi di menu <b>Akun</b></li></ol>' +
+        '<button class="btn btn-primary" id="ppOk" type="button">Mengerti</button>' +
+        '<button class="pp-never" id="ppNever" type="button">Jangan tampilkan lagi</button></div>';
+    } else {
+      m.innerHTML = '<div class="modal-box push-prompt">' + art +
+        '<h3>Aktifkan notifikasi?</h3>' +
+        '<p>Dapatkan info langsung di perangkat ini saat ada perubahan data — walau aplikasi sedang ditutup.</p>' +
+        '<ul class="pp-list"><li><i>✓</i>Data baru ditambahkan, lengkap dengan nama &amp; kampung</li><li><i>✓</i>Verifikasi suara dan status cetak KTP</li><li><i>✓</i>Bisa dimatikan kapan saja di menu <b>Akun</b></li></ul>' +
+        '<button class="btn btn-primary" id="ppEnable" type="button">Aktifkan Notifikasi</button>' +
+        '<button class="pp-later" id="ppLater" type="button">Nanti saja</button>' +
+        '<button class="pp-never" id="ppNever" type="button">Jangan tanyakan lagi</button></div>';
+    }
+    const on = (id, fn) => { const el = m.querySelector('#' + id); if (el) el.addEventListener('click', fn); };
+    on('ppEnable', async () => {
+      closePrompt();
+      await enablePush(); // harus dipanggil dari gestur klik agar izin bisa diminta
+      if (N.push.permission !== 'default') setPromptRec({ never: true });
+      else setPromptRec({ until: Date.now() + 24 * 3600 * 1000 });
+    });
+    on('ppLater', () => { setPromptRec({ until: Date.now() + LATER_MS }); closePrompt(); });
+    on('ppNever', () => { setPromptRec({ never: true }); closePrompt(); });
+    on('ppOk', () => { setPromptRec({ until: Date.now() + 30 * 24 * 3600 * 1000 }); closePrompt(); });
+    m.classList.add('show');
+  }
+
+  function schedulePrompt(tries) {
+    tries = tries || 0;
+    const p = N.push;
+    if (!p.ready || !p.enabled || !N.started) return;
+    const rec = getPromptRec();
+    if (rec.never || (rec.until && Date.now() < rec.until)) return;
+    let kind = null;
+    if (p.supported && p.permission === 'default' && !p.subscribed) kind = 'enable';
+    else if (!p.supported && isIOS() && !isStandalone()) kind = 'ios';
+    if (!kind) return;
+    setTimeout(() => {
+      if (!N.started) return;
+      // jangan menimpa modal lain; coba lagi sebentar lagi
+      if (document.querySelector('.modal-bg.show')) { if (tries < 5) schedulePrompt(tries + 1); return; }
+      showPrompt(kind);
+    }, tries ? 4000 : 1800);
   }
 
   /* ---------------- deep link ---------------- */
@@ -435,7 +524,8 @@
     N.started = false;
     if (N.timer) { clearInterval(N.timer); N.timer = null; }
     document.removeEventListener('visibilitychange', onVisible);
-    N.items = []; N.unread = 0; N.known = {}; N.loaded = false;
+    N.items = []; N.unread = 0; N.known = {}; N.loaded = false; N.push.ready = false;
+    closePrompt();
     updateBadges();
   }
 
@@ -459,5 +549,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
 
   window.renderNotif = renderPage;
-  window.__notif = { start, stop, onLogout, open: openPanel, close: closePanel, refresh: fetchNotifs };
+  window.__notif = { start, stop, onLogout, open: openPanel, close: closePanel, refresh: fetchNotifs, mountPushCard };
 })();

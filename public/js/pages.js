@@ -246,6 +246,7 @@
           '<button class="menu-item" data-goto="logs" type="button"><span class="mi-ico">' + (ICONS.card || '') + '</span><span class="mi-txt">Log Aktivitas</span><span class="mi-chev">' + (ICONS.next || '›') + '</span></button>' +
         '</div>' +
       '</div>' : '') +
+      '<div id="profilPushCard" class="profil-push"></div>' +
       '<div class="cfg-section">' +
         '<div class="cfg-section-head">' +
           '<div class="cfg-section-ico">🔑</div>' +
@@ -264,6 +265,7 @@
       '</div>' +
       '<button class="logout-card mobile-only" id="btnProfilLogout" type="button">' + (ICONS.close || '') + ' Keluar Aplikasi</button>';
 
+    if (window.__notif && window.__notif.mountPushCard) window.__notif.mountPushCard('profilPushCard');
     c.querySelectorAll('[data-goto]').forEach(btn => {
       btn.addEventListener('click', () => { if (A.setPage) A.setPage(btn.getAttribute('data-goto')); });
     });
