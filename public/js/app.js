@@ -1661,7 +1661,28 @@
       '<div class="form-layout">' +
         '<div class="form-main">' +
           '<section class="form-section">' +
-            '<div class="fs-head"><span class="fs-ico">' + ICONS.users + '</span><h3>1. Data Diri</h3></div>' +
+            '<div class="fs-head"><span class="fs-ico ico-amber">' + ICONS.card + '</span><h3>1. Foto KTP</h3><span class="fs-opt">Opsional</span></div>' +
+            '<div class="foto-box" id="fotoBox">' +
+              '<div class="foto-placeholder" id="fotoPlaceholder">' +
+                '<div class="ico">' + ICONS.card + '</div>' +
+                'Ambil foto KTP — Nama & NIK terisi otomatis' +
+              '</div>' +
+              '<img id="fotoPreview" class="foto-preview" style="display:none" alt="">' +
+              '<div class="foto-btns">' +
+                '<button type="button" class="foto-btn primary" id="btnKamera">' + ICONS.camera + 'Kamera</button>' +
+                '<button type="button" class="foto-btn" id="btnGaleri">' + ICONS.gallery + 'Galeri</button>' +
+              '</div>' +
+              '<button type="button" class="foto-hapus" id="btnHapusFoto" style="display:none">' + ICONS.trash + 'Hapus Foto</button>' +
+            '</div>' +
+            '<div class="foto-tools" id="fotoTools">' +
+              '<button type="button" id="btnFotoEdit">' + ICONS.card + 'Putar / Crop</button>' +
+              '<button type="button" id="btnOcrUlang">' + ICONS.refresh + 'Baca Ulang Data</button>' +
+            '</div>' +
+            '<div class="ocr-st" id="ocrSt" role="status" aria-live="polite"></div>' +
+          '</section>' +
+
+          '<section class="form-section">' +
+            '<div class="fs-head"><span class="fs-ico">' + ICONS.users + '</span><h3>2. Data Diri</h3></div>' +
             '<div class="form-row">' +
               '<div class="form-group">' +
                 '<label class="form-label" for="fNama">Nama Lengkap <span class="req">*</span></label>' +
@@ -1677,7 +1698,7 @@
           '</section>' +
 
           '<section class="form-section">' +
-            '<div class="fs-head"><span class="fs-ico ico-green">' + ICONS.home + '</span><h3>2. Alamat</h3></div>' +
+            '<div class="fs-head"><span class="fs-ico ico-green">' + ICONS.home + '</span><h3>3. Alamat</h3></div>' +
             '<div class="form-row">' +
               '<div class="form-group">' +
                 '<label class="form-label" for="fKampung">Kampung <span class="req">*</span></label>' +
@@ -1688,27 +1709,6 @@
                 '<select class="form-select" id="fRt">' + rtOpts + '</select>' +
               '</div>' +
             '</div>' +
-          '</section>' +
-
-          '<section class="form-section">' +
-            '<div class="fs-head"><span class="fs-ico ico-amber">' + ICONS.card + '</span><h3>3. Foto KTP</h3><span class="fs-opt">Opsional</span></div>' +
-            '<div class="foto-box" id="fotoBox">' +
-              '<div class="foto-placeholder" id="fotoPlaceholder">' +
-                '<div class="ico">' + ICONS.card + '</div>' +
-                'Ambil foto KTP langsung atau pilih dari galeri' +
-              '</div>' +
-              '<img id="fotoPreview" class="foto-preview" style="display:none" alt="">' +
-              '<div class="foto-btns">' +
-                '<button type="button" class="foto-btn primary" id="btnKamera">' + ICONS.camera + 'Kamera</button>' +
-                '<button type="button" class="foto-btn" id="btnGaleri">' + ICONS.gallery + 'Galeri</button>' +
-              '</div>' +
-              '<button type="button" class="foto-hapus" id="btnHapusFoto" style="display:none">' + ICONS.trash + 'Hapus Foto</button>' +
-            '</div>' +
-            '<div class="foto-tools" id="fotoTools">' +
-              '<button type="button" id="btnFotoEdit">' + ICONS.card + 'Putar / Crop</button>' +
-              '<button type="button" id="btnOcrUlang">' + ICONS.refresh + 'Baca Ulang Data</button>' +
-            '</div>' +
-            '<div class="ocr-st" id="ocrSt" role="status" aria-live="polite"></div>' +
           '</section>' +
 
           '<div class="form-actions">' +
