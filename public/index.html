@@ -509,6 +509,54 @@
 </div>
 
 <!-- ============================================================ -->
+<!-- MODAL: TAMBAH / EDIT AGENDA                                   -->
+<!-- ============================================================ -->
+<div class="modal-bg" id="modalAgenda">
+  <div class="modal-box modal-agenda">
+    <h3 id="agTitle" class="ag-modal-title">Tambah Agenda</h3>
+    <div class="form-group">
+      <label class="form-label" for="agJudul">Judul <span class="req">*</span></label>
+      <input type="text" class="form-input" id="agJudul" maxlength="120" placeholder="Mis. Rapat koordinasi tim" autocomplete="off">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label" for="agJenis">Jenis</label>
+        <select class="form-select" id="agJenis">
+          <option value="pemilihan">🗳️ Hari Pemilihan (Hari H)</option>
+          <option value="kunjungan">🤝 Kunjungan</option>
+          <option value="rapat">👥 Rapat</option>
+          <option value="lainnya">📌 Lainnya</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="agTanggal">Tanggal <span class="req">*</span></label>
+        <input type="date" class="form-input" id="agTanggal">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label" for="agJam">Jam <span class="ag-opt">(opsional)</span></label>
+        <input type="time" class="form-input" id="agJam">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="agLokasi">Lokasi <span class="ag-opt">(opsional)</span></label>
+        <input type="text" class="form-input" id="agLokasi" maxlength="120" placeholder="Mis. Balai Desa" autocomplete="off">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="agCatatan">Catatan <span class="ag-opt">(opsional)</span></label>
+      <input type="text" class="form-input" id="agCatatan" maxlength="300" placeholder="Mis. Bawa daftar pendukung" autocomplete="off">
+    </div>
+    <div class="login-err ag-err" id="agErr"></div>
+    <div class="confirm-btns">
+      <button class="btn btn-outline" id="agCancel" type="button">Batal</button>
+      <button class="btn btn-primary" id="agSave" type="button">Simpan</button>
+    </div>
+    <p class="ag-hint">Seluruh user otomatis menerima notifikasi saat agenda dibuat atau diubah.</p>
+  </div>
+</div>
+
+<!-- ============================================================ -->
 <!-- TOAST NOTIFICATION                                            -->
 <!-- ============================================================ -->
 <div class="toast" id="toast"></div>
@@ -541,6 +589,7 @@
   <script src="/js/app.js"></script>
   <script src="/js/pages.js"></script>
   <script src="/js/notif.js"></script>
+  <script src="/js/agenda.js"></script>
   <script src="/js/pwa.js"></script>
 
 </body>
