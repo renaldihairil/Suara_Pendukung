@@ -24,7 +24,9 @@ module.exports = async (req, res) => {
     foto.catatan = 'APPSCRIPT_PHOTO_URL / APPSCRIPT_PHOTO_KEY belum diisi di Vercel (lihat README)';
   } else {
     try {
-      const pong = await gd.gwCall({ op: 'ping' });
+      const t0 = Date.now();
+      const pong = await gd.gwCall({ op: 'ping' }, { timeoutMs: 15000, retries: 0 });
+      foto.pingMs = Date.now() - t0;
       const cap = pong.cap || {};
       foto.akun = pong.user || undefined;
       foto.izin = cap;
