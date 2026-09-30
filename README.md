@@ -71,6 +71,25 @@ mock/            Dev server lokal dengan Google di-mock (untuk QA tanpa kredensi
 - **iPhone (Safari)**: Share → **Add to Home Screen**.
 - App shell tampil saat offline (halaman offline ramah); data/foto tetap butuh internet.
 
+## 5b. Notifikasi (dalam aplikasi + Push)
+
+Setiap aksi penting admin otomatis membuat notifikasi untuk user lain, lengkap dengan nama data dan kampungnya, contoh:
+*"Siti Rahayu ditambahkan di Kampung Sasak (RT 002) oleh Administrator."*
+
+| Aksi | Dikirim ke |
+|---|---|
+| Tambah / ubah / hapus data | semua user (kecuali pelaku) |
+| Verifikasi / batal verifikasi, tandai cetak (satuan & massal) | semua user |
+| Ubah pengaturan / nama kampung | semua user |
+| User baru ditambahkan | admin saja |
+
+- **Scan duplikat NIK (admin):** tombol kaca pembesar kuning di kanan bawah layar.
+- **Dalam aplikasi:** ikon lonceng di pojok atas (badge jumlah belum dibaca), panel notifikasi, dan halaman *Notifikasi*. Klik notifikasi membuka detail datanya. Memakai 3 sheet yang dibuat otomatis: `Notifikasi`, `NotifState`, `PushSubs`.
+- **Push (muncul walau aplikasi ditutup):** tiap user mengaktifkannya sendiri: lewat popup ajakan saat pertama kali login di perangkat, atau kapan saja lewat kartu *Notifikasi Push* di halaman **Akun** (profil) dan halaman Notifikasi. Butuh kunci VAPID:
+  1. `npm run vapid` → salin hasilnya ke Vercel → Settings → Environment Variables (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`), lalu redeploy.
+  2. **Android/Desktop (Chrome/Edge/Firefox):** langsung bisa. **iPhone:** aplikasi harus di-*Add to Home Screen* dulu (iOS 16.4+).
+- Tanpa kunci VAPID, notifikasi dalam aplikasi tetap berfungsi; hanya push yang nonaktif.
+
 ## 6. Alur Kerja Git → Deploy
 
 ```bash

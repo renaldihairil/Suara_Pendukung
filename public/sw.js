@@ -5,7 +5,7 @@
  *  - Navigasi (HTML)     : network-first → fallback cache → offline.html
  *  - /api/*              : network-only (data selalu fresh; foto no-store)
  * ============================================================ */
-const VERSION = 'pendukung-v3';
+const VERSION = 'pendukung-v5';
 const SHELL = [
   '/',
   '/index.html',
@@ -14,6 +14,7 @@ const SHELL = [
   '/js/api-shim.js',
   '/js/app.js',
   '/js/pages.js',
+  '/js/notif.js',
   '/js/pwa.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
@@ -90,6 +91,42 @@ self.addEventListener('fetch', (event) => {
         }
         return res;
       }).catch(() => new Response('', { status: 504 }));
+    })
+  );
+});
+
+/* ============================================================
+ * WEB PUSH — notifikasi dari server (lib/push.js)
+ * Payload JSON: { title, body, tag, url, icon }
+ * ============================================================ */
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data ? event.data.text() : '' }; }
+  const title = data.title || 'Suara Pendukung';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || '',
+      icon: data.icon || '/icons/icon-192.png',
+      badge: '/icons/favicon-32.png',
+      tag: data.tag || undefined,
+      renotify: !!data.tag,
+      data: { url: data.url || '/?nav=notif' }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ('focus' in c) {
+          c.postMessage({ type: 'notif-click', url: target });
+          return c.focus();
+        }
+      }
+      return self.clients.openWindow(target);
     })
   );
 });
