@@ -67,8 +67,8 @@ Di project Apps Script lama (yang terikat ke spreadsheet yang sama):
    }
    ```
 4. **Tambah layanan Drive** (untuk OCR): sidebar **Layanan (+)** → **Drive API** → **Tambahkan**.
-5. **Cek izin di `appsscript.json`** — lihat bagian 5 (langkah ini yang paling sering terlewat).
-6. **Beri izin**: di dropdown fungsi pilih **`pgwAuthorize`** → **Jalankan** → **Tinjau izin** → akun Anda → *Advanced → Go to … (unsafe)* → **Izinkan**. (Dialog izin tidak muncul bila `oauthScopes` belum lengkap — kembali ke langkah 5.)
+5. **Tulis izin eksplisit di `appsscript.json`** — lihat bagian 5 (langkah ini yang paling sering terlewat).
+6. **Beri izin**: di dropdown fungsi pilih **`pgwAuthorize`** → **Jalankan** → **Tinjau izin** → akun Anda → *Advanced → Go to … (unsafe)* → **Izinkan**. (Dialog izin harus memuat 4 izin; bila tidak muncul, ulangi langkah 5.)
 7. **Deploy**: **Terapkan → Kelola deployment** → pensil pada Web App → **Versi: Versi baru** → **Terapkan**.
    Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: **Siapa saja***. Salin **URL Web App** (berakhiran `/exec`).
 8. **Vercel** → Environment Variables: `APPSCRIPT_PHOTO_URL` = URL tadi, `APPSCRIPT_PHOTO_KEY` = isi `PGW_KEY` → **Redeploy**.
@@ -90,22 +90,30 @@ Pilih environment **Production** saja. Variabel baru aktif setelah **Redeploy**.
 
 ## 5. Izin Apps Script (`appsscript.json`)
 
-Skrip memerlukan izin: **Drive**, **Google Dokumen** (OCR), dan **email akun**. Buka file **`appsscript.json`** di editor Apps Script:
+Jembatan memerlukan izin **Spreadsheet**, **Drive**, **Google Dokumen** (OCR), dan **email akun**. Bila `appsscript.json` tidak mencantumkan izin secara eksplisit, Google menebak sendiri dan kadang tidak menampilkan dialog untuk izin baru (gejala: *"You do not have permission to call …"*, atau `/api/health` → `foto.izin` ada yang `false`). Cara paling pasti: **tulis izinnya secara eksplisit**. Ganti seluruh isi `appsscript.json` dengan (sesuaikan `timeZone` bila beda):
 
-- Bila **tidak ada** baris `"oauthScopes"` → tidak perlu diubah; jalankan `pgwAuthorize` (langkah C6).
-- Bila **ada** `"oauthScopes": [ ... ]` → Google hanya memberi izin yang tercantum. **Tambahkan** yang belum ada:
-  ```json
+```json
+{
+  "timeZone": "Asia/Singapore",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      { "userSymbol": "Drive", "version": "v3", "serviceId": "drive" }
+    ]
+  },
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
   "oauthScopes": [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/documents",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/script.external_request"
-  ]
-  ```
-  (pertahankan scope lain yang sudah ada), simpan, jalankan `pgwAuthorize` lagi, lalu deploy versi baru.
+    "https://www.googleapis.com/auth/userinfo.email"
+  ],
+  "webapp": { "executeAs": "USER_DEPLOYING", "access": "ANYONE_ANONYMOUS" }
+}
+```
 
-Gejala bila izin kurang: `/api/health` → `foto.izin` ada yang `false`, atau pesan *"You do not have permission to call …"*.
+Lalu: **Simpan** → jalankan **`pgwAuthorize`** (dialog izin kini memuat keempat izin → *Izinkan*) → **Terapkan → Kelola deployment → pensil → Versi baru → Terapkan** → cek `/api/health`.
+(Aplikasi Apps Script lama hanya memakai Spreadsheet & Drive, jadi tidak terpengaruh.)
 
 ## 6. Fitur
 
