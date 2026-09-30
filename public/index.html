@@ -46,7 +46,6 @@
     <symbol id="i-log" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></symbol>
     <symbol id="i-user" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
     <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
-    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
     <symbol id="i-scan" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
     <symbol id="i-chevron-down" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
@@ -168,11 +167,6 @@
       </button>
 
       <div class="sb-label">Akun</div>
-      <button class="snav" data-nav="notif" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-bell"/></svg>
-        <span>Notifikasi</span>
-        <span class="snav-badge js-notif-badge" style="display:none">0</span>
-      </button>
       <button class="snav" data-nav="profil" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-user"/></svg>
         <span>Profil Saya</span>
@@ -212,12 +206,6 @@
           <span class="sync-dot" id="syncDot"></span>
           <span id="headerStatus">Live</span>
         </div>
-
-        <!-- Notifikasi (semua role) -->
-        <button class="tb-icon-btn" id="notifBtn" title="Notifikasi" aria-label="Notifikasi" aria-haspopup="dialog" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-bell"/></svg>
-          <span class="fab-badge js-notif-badge" id="notifBadge" style="display:none">0</span>
-        </button>
 
         <button class="tb-user" data-nav="profil" type="button" title="Profil saya">
           <div class="avatar js-user-initials">A</div>
@@ -270,10 +258,6 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-scan"/></svg>
     <span class="fab-badge" id="fabBadge" style="display:none">0</span>
   </button>
-
-  <!-- ============ PANEL NOTIFIKASI ============ -->
-  <div class="notif-backdrop" id="notifBackdrop"></div>
-  <section class="notif-panel" id="notifPanel" role="dialog" aria-label="Notifikasi"></section>
 </div>
 
 <!-- ============================================================ -->
@@ -509,54 +493,6 @@
 </div>
 
 <!-- ============================================================ -->
-<!-- MODAL: TAMBAH / EDIT AGENDA                                   -->
-<!-- ============================================================ -->
-<div class="modal-bg" id="modalAgenda">
-  <div class="modal-box modal-agenda">
-    <h3 id="agTitle" class="ag-modal-title">Tambah Agenda</h3>
-    <div class="form-group">
-      <label class="form-label" for="agJudul">Judul <span class="req">*</span></label>
-      <input type="text" class="form-input" id="agJudul" maxlength="120" placeholder="Mis. Rapat koordinasi tim" autocomplete="off">
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label" for="agJenis">Jenis</label>
-        <select class="form-select" id="agJenis">
-          <option value="pemilihan">🗳️ Hari Pemilihan (Hari H)</option>
-          <option value="kunjungan">🤝 Kunjungan</option>
-          <option value="rapat">👥 Rapat</option>
-          <option value="lainnya">📌 Lainnya</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="agTanggal">Tanggal <span class="req">*</span></label>
-        <input type="date" class="form-input" id="agTanggal">
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label" for="agJam" id="agJamLbl">Jam <span class="ag-opt">(opsional)</span></label>
-        <input type="time" class="form-input" id="agJam">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="agLokasi">Lokasi <span class="ag-opt">(opsional)</span></label>
-        <input type="text" class="form-input" id="agLokasi" maxlength="120" placeholder="Mis. Balai Desa" autocomplete="off">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label" for="agCatatan">Catatan <span class="ag-opt">(opsional)</span></label>
-      <input type="text" class="form-input" id="agCatatan" maxlength="300" placeholder="Mis. Bawa daftar pendukung" autocomplete="off">
-    </div>
-    <div class="login-err ag-err" id="agErr"></div>
-    <div class="confirm-btns">
-      <button class="btn btn-outline" id="agCancel" type="button">Batal</button>
-      <button class="btn btn-primary" id="agSave" type="button">Simpan</button>
-    </div>
-    <p class="ag-hint">Seluruh user otomatis menerima notifikasi saat agenda dibuat atau diubah.</p>
-  </div>
-</div>
-
-<!-- ============================================================ -->
 <!-- TOAST NOTIFICATION                                            -->
 <!-- ============================================================ -->
 <div class="toast" id="toast"></div>
@@ -588,8 +524,6 @@
   <script src="/js/api-shim.js"></script>
   <script src="/js/app.js"></script>
   <script src="/js/pages.js"></script>
-  <script src="/js/notif.js"></script>
-  <script src="/js/agenda.js"></script>
   <script src="/js/pwa.js"></script>
 
 </body>
