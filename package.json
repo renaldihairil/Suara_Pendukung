@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "node mock/dev-server.js",
-    "start": "node mock/dev-server.js"
+    "start": "node mock/dev-server.js",
+    "vapid": "node scripts/gen-vapid.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

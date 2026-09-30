@@ -110,6 +110,7 @@
       startPolling();
       if (isAdmin()) checkDupBadge();
       watchModals();
+      if (window.__notif) window.__notif.start();
     });
   }
 
@@ -362,6 +363,7 @@
     else if (state.page === 'users') renderUsers();
     else if (state.page === 'logs') renderLogs();
     else if (state.page === 'profil') renderProfil();
+    else if (state.page === 'notif') { if (window.renderNotif) window.renderNotif(); }
   }
 
   function isStillOn(token, page) {
@@ -463,8 +465,13 @@
       });
   }
 
-  $('logoutBtn').addEventListener('click', () => {
+  $('logoutBtn').addEventListener('click', async () => {
     stopPolling();
+    if (window.__notif) {
+      // lepas langganan push perangkat ini dari akun sebelum sesi berakhir
+      try { await window.__notif.onLogout(); } catch (e) {}
+      window.__notif.stop();
+    }
     try {
       ['pendukung_auth', 'pendukung_user', 'pendukung_cache_v1', 'pendukung_cache_at', 'pendukung_cache_version', 'pendukung_config'].forEach(k => sessionStorage.removeItem(k));
     } catch (e) {}
@@ -3866,6 +3873,6 @@
   // ============================================================ //
   // EKSPOR UNTUK pages.js (halaman admin & profil)                //
   // ============================================================ //
-  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, setPage, state: state };
+  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, setPage, reloadData: cb => fetchAndReplace(true, cb), state: state };
 
 })();
