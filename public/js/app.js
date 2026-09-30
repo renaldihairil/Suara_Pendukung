@@ -1997,11 +1997,11 @@
     });
   }
 
-  // Kecilkan foto untuk OCR: maks. 1600px & ±700KB (batas OCR.space gratis 1MB; upload lebih cepat)
+  // Kecilkan foto untuk OCR: maks. 1280px & ±300KB (OCR Drive lebih cepat, upload dari HP cepat, batas OCR.space 1MB)
   function shrinkForOcr(dataUrl, cb) {
     const img = new Image();
     img.onload = () => {
-      const tries = [[1600, 0.88], [1400, 0.78], [1100, 0.7]];
+      const tries = [[1280, 0.82], [1100, 0.75], [960, 0.7]];
       let out = dataUrl;
       for (const [maxSide, q] of tries) {
         const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
@@ -2011,7 +2011,7 @@
         g.imageSmoothingQuality = 'high';
         g.drawImage(img, 0, 0, c.width, c.height);
         out = c.toDataURL('image/jpeg', q);
-        if (out.length < 950000) break;
+        if (out.length < 420000) break;
       }
       cb(out);
     };
@@ -2043,7 +2043,7 @@
     let html = '';
     const sure = applied.length && d.confidence === 'high';
     if (applied.length) {
-      html += (sure ? '✅ <b>Terbaca otomatis:</b> ' : '⚠️ <b>Terisi otomatis (mohon cek):</b> ') + applied.join(' & ') + '. Periksa kembali sebelum menyimpan.';
+      html += (sure ? '✅ <b>Terbaca otomatis:</b> ' : '⚠️ <b>Terisi otomatis (mohon cek):</b> ') + applied.join(' & ') + '. Periksa kembali sebelum menyimpan.' + (r.ms ? ' <span style="opacity:.7">(' + (r.ms / 1000).toFixed(1) + ' dtk)</span>' : '');
     }
     if (offers.length) {
       html += (html ? '<br>' : '') + offers.map(o =>

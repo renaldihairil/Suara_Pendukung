@@ -160,6 +160,14 @@ process.env.APPSCRIPT_PHOTO_KEY = process.env.APPSCRIPT_PHOTO_KEY || 'kunci-uji-
     if (String(url).startsWith('https://script.google.com/macros/s/MOCK')) {
       if (process.env.MOCK_GW_HTML) return { ok: true, status: 200, text: async () => '<html>Login</html>' };
       const req = JSON.parse((opt && opt.body) || '{}');
+      // Uji: Apps Script lambat (MOCK_GW_DELAY_MS untuk op ocr); menghormati AbortSignal seperti fetch asli
+      const delay = req.op === 'ocr' ? Number(process.env.MOCK_GW_DELAY_MS || 0) : 0;
+      if (delay) {
+        await new Promise((resolve, reject) => {
+          const t = setTimeout(resolve, delay);
+          if (opt && opt.signal) opt.signal.addEventListener('abort', () => { clearTimeout(t); const e = new Error('aborted'); e.name = 'AbortError'; reject(e); });
+        });
+      }
       const out = o => ({ ok: true, status: 200, text: async () => JSON.stringify(o) });
       if (req.key !== KEY) return out({ ok: false, message: 'Kunci salah' });
       if (req.op === 'ping') return out({ ok: true, user: 'pemilik@example.com', cap: { drive: true, email: true, dokumen: !process.env.MOCK_GW_NO_DOCS, driveApi: !process.env.MOCK_GW_NO_DRIVE } });
