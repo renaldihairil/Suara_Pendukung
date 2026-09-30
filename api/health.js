@@ -28,6 +28,7 @@ module.exports = async (req, res) => {
       const cap = pong.cap || {};
       foto.akun = pong.user || undefined;
       foto.izin = cap;
+      foto.versi = pong.ver || 'lama (skrip belum diperbarui)';
       // upload/baca foto butuh: drive. OCR butuh: drive + dokumen + driveApi.
       foto.ok = cap.drive !== false;
       const kurang = [];
