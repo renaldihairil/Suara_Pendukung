@@ -60,7 +60,9 @@
     sel: { on: false, ids: {}, pageIds: [], busy: false },
     user: null,               // { username, nama, role } dari /api/auth
     usersCache: null,         // daftar user (halaman Kelola User, admin)
-    logsCache: null           // daftar log (halaman Log, admin)
+    logsCache: null,          // daftar log (halaman Log, admin)
+    dashLogs: null,           // 8 log terbaru untuk kartu Aktivitas Terbaru (dashboard, admin)
+    dashLogsAt: 0
   };
 
   // ============================================================ //
@@ -74,23 +76,27 @@
     document.querySelectorAll('[data-nav="input"], [data-nav="pengaturan"]').forEach(el => {
       el.style.display = admin ? '' : 'none';
     });
-    // Nav admin: Kelola User & Log (desktop + mobile)
-    document.querySelectorAll('[data-nav="users"], [data-nav="logs"]').forEach(el => {
+    // Nav admin: Kelola User & Log Aktivitas (+ judul grup-nya)
+    document.querySelectorAll('[data-nav="users"], [data-nav="logs"], .admin-only').forEach(el => {
       el.style.display = admin ? '' : 'none';
     });
     const fab = $('fabScan');
     if (fab) fab.style.display = admin ? '' : 'none';
-    // Nama user di header
-    const who = $('userBadge');
-    if (who) who.textContent = (state.user ? (state.user.nama || state.user.username) : '') + (admin ? ' • Admin' : '');
-    const whoM = $('userBadgeM');
-    if (whoM) whoM.textContent = who ? who.textContent : '';
+
+    // Identitas user (sidebar, topbar, avatar)
+    const u = state.user || {};
+    const nama = u.nama || u.username || 'Pengguna';
+    document.querySelectorAll('.js-user-name').forEach(el => { el.textContent = nama; });
+    document.querySelectorAll('.js-user-role').forEach(el => { el.textContent = admin ? 'Admin' : 'User'; });
+    document.querySelectorAll('.js-user-initials').forEach(el => { el.textContent = initialsOf(nama); });
+    document.body.classList.toggle('role-admin', admin);
+    document.body.classList.toggle('role-user', !admin);
   }
 
   function startAppAfterLogin() {
     try { sessionStorage.setItem('pendukung_auth', '1'); } catch (e) {}
     $('loginScreen').style.display = 'none';
-    $('mainApp').style.display = 'block';
+    $('mainApp').style.removeProperty('display');
     const fab = $('fabScan');
     if (fab && isAdmin()) fab.classList.add('show');
     applyRoleUI();
@@ -185,6 +191,7 @@
     // ⭐ ICON SORT
     sortAZ: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h10"/><path d="M3 12h7"/><path d="M3 18h4"/><path d="M17 4v16"/><polyline points="13 16 17 20 21 16"/></svg>',
     sortZA: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h4"/><path d="M3 12h7"/><path d="M3 18h10"/><path d="M17 20V4"/><polyline points="13 8 17 4 21 8"/></svg>',
+    logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
     // ⭐ ICON status cetak
     printer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>'
   };
@@ -214,7 +221,7 @@
       txt.textContent = 'Offline';
     } else {
       dot.className = 'sync-dot';
-      txt.textContent = 'Live • Pilkades 2026';
+      txt.textContent = 'Live';
     }
   }
 
@@ -294,6 +301,24 @@
     renderCurrentPage();
   }
 
+  // Pencarian global di topbar → buka halaman Data dengan kata kunci tsb
+  (function initGlobalSearch() {
+    const inp = document.getElementById('globalSearch');
+    const form = document.getElementById('globalSearchForm');
+    if (!inp || !form) return;
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const q = inp.value.trim();
+      state.detailKampung = null;
+      state.filter.q = q;
+      state.currentPage = 1;
+      if (state.page === 'data') { renderData(); } else { setPage('data'); }
+      inp.blur();
+    });
+    // Sinkron: kalau kata kunci dikosongkan di halaman Data, kosongkan juga di topbar
+    inp.addEventListener('search', () => { if (!inp.value && state.filter.q) { state.filter.q = ''; if (state.page === 'data') renderData(); } });
+  })();
+
   function openDetailKampung(namaKampung) {
     state.detailKampung = namaKampung;
     state.detailFilterRT = '';
@@ -343,25 +368,11 @@
     return state.pageToken === token && state.page === page;
   }
 
-  function updateFabVisibility() {
-    const fab = $('fabScan');
-    if (!fab) return;
-    const anyModalOpen = ['modalFoto','modalEdit','modalConfirm','modalDupWarning','modalScanDup','modalKampungEdit','modalDetailWarga','modalVerifTTD','modalCropFoto']
-      .some(id => { const m = $(id); return m && m.classList.contains('show'); });
-    if (anyModalOpen) {
-      fab.style.opacity = '0';
-      fab.style.pointerEvents = 'none';
-      fab.style.transform = 'scale(.5)';
-    } else {
-      fab.style.opacity = '1';
-      fab.style.pointerEvents = 'auto';
-      fab.style.transform = 'scale(1)';
-    }
-  }
+  // Tombol scan duplikat kini ikon lonceng di topbar (tertutup overlay modal
+  // dengan sendirinya), jadi tidak perlu disembunyikan secara manual lagi.
+  function updateFabVisibility() {}
 
-  function watchModals() {
-    setInterval(() => updateFabVisibility(), 500);
-  }
+  function watchModals() {}
 
   // ============================================================ //
   // CONFIG LOADER                                                 //
@@ -376,8 +387,8 @@
     state.configLoaded = true;
     state.cfgCache = cfg;
     const sub = $('loginSub');
-    if (sub) sub.innerHTML = esc(NAMA_PILKADES) + '<br><strong>' + esc(NAMA_KANDIDAT) + '</strong>';
-    document.title = 'Data Pendukung ' + NAMA_KANDIDAT;
+    if (sub) sub.textContent = NAMA_PILKADES;
+    document.title = 'Suara Pendukung — ' + NAMA_KANDIDAT;
   }
 
   function loadConfig(cb) {
@@ -407,6 +418,16 @@
   // ============================================================ //
   $('loginBtn').addEventListener('click', doLogin);
   $('loginPass').addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+  $('loginUser').addEventListener('keypress', e => { if (e.key === 'Enter') { e.preventDefault(); if ($('loginPass').value) doLogin(); else $('loginPass').focus(); } });
+
+  // Tampilkan / sembunyikan password
+  $('loginEye').addEventListener('click', () => {
+    const inp = $('loginPass');
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    $('loginEyeUse').setAttribute('href', show ? '#i-eye-off' : '#i-eye');
+    $('loginEye').title = show ? 'Sembunyikan password' : 'Tampilkan password';
+  });
 
   function doLogin() {
     const uname = $('loginUser').value.trim();
@@ -600,47 +621,163 @@
       .apiGetDashboard();
   }
 
+  // ---------- helper tampilan bersama ---------- //
+  function pageHead(title, sub, rightHtml) {
+    return '<div class="page-head">' +
+      '<div class="ph-txt"><h1 class="ph-title">' + title + '</h1>' + (sub ? '<p class="ph-sub">' + sub + '</p>' : '') + '</div>' +
+      (rightHtml ? '<div class="ph-right">' + rightHtml + '</div>' : '') +
+    '</div>';
+  }
+
+  function timeAgo(iso) {
+    const t = Date.parse(iso);
+    if (!t) return '';
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return 'baru saja';
+    const m = Math.round(s / 60);
+    if (m < 60) return m + ' menit lalu';
+    const h = Math.round(m / 60);
+    if (h < 24) return h + ' jam lalu';
+    const d = Math.round(h / 24);
+    if (d < 30) return d + ' hari lalu';
+    return new Date(t).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  // aksi log → { teks ramah, ikon, warna }
+  function logMeta(aksi) {
+    const a = String(aksi || '');
+    const M = {
+      ADD:            ['Data pendukung baru ditambahkan', 'users', 'green'],
+      UPDATE:         ['Data pendukung diperbarui', 'edit', 'blue'],
+      DELETE:         ['Data pendukung dihapus', 'trash', 'red'],
+      VERIFY_TTD:     ['Suara diverifikasi (bukti TTD)', 'shield', 'green'],
+      UNVERIFY:       ['Verifikasi dibatalkan', 'clock', 'amber'],
+      TOGGLE_CETAK:   ['Status cetak diubah', 'printer', 'blue'],
+      CETAK_MASSAL:   ['Status cetak massal diubah', 'printer', 'blue'],
+      SAVE_CONFIG:    ['Pengaturan aplikasi disimpan', 'settings', 'slate'],
+      RENAME_KAMPUNG: ['Nama kampung diperbarui', 'home', 'amber'],
+      USER_ADD:       ['User baru ditambahkan', 'users', 'green'],
+      USER_UPDATE:    ['Data user diperbarui', 'edit', 'blue'],
+      USER_RESET_PASS:['Password user direset', 'shield', 'amber'],
+      GANTI_PASSWORD: ['Password diganti', 'shield', 'slate'],
+      AKSES_DITOLAK:  ['Akses ditolak', 'warn', 'red']
+    };
+    if (M[a]) return { text: M[a][0], ico: M[a][1], tone: M[a][2] };
+    if (/LOGIN/.test(a)) return { text: /GAGAL/.test(a) ? 'Percobaan login gagal' : 'Login berhasil', ico: 'shield', tone: /GAGAL/.test(a) ? 'red' : 'slate' };
+    if (/LOGOUT/.test(a)) return { text: 'Logout', ico: 'close', tone: 'slate' };
+    return { text: a.replace(/_/g, ' ').toLowerCase().replace(/^./, c => c.toUpperCase()), ico: 'info', tone: 'slate' };
+  }
+
+  function dashActivityHtml() {
+    const logs = state.dashLogs;
+    if (!logs) return '<div class="act-loading"><div class="spinner" style="width:22px;height:22px;border-width:2px;margin:0 auto 8px"></div>Memuat aktivitas…</div>';
+    if (!logs.length) return '<div class="act-empty">Belum ada aktivitas tercatat.</div>';
+    return logs.slice(0, 5).map(l => {
+      const m = logMeta(l.aksi);
+      const who = l.username ? 'oleh ' + esc(l.username) : '';
+      return '<div class="act-item">' +
+        '<div class="act-ico tone-' + m.tone + '">' + (ICONS[m.ico] || ICONS.info) + '</div>' +
+        '<div class="act-txt"><div class="act-title">' + esc(m.text) + '</div>' +
+        '<div class="act-meta">' + who + (who ? ' • ' : '') + esc(timeAgo(l.timestamp)) + '</div></div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function loadDashLogs(force) {
+    if (!isAdmin()) return;
+    if (!force && state.dashLogs && Date.now() - (state.dashLogsAt || 0) < 30000) return;
+    state.dashLogsAt = Date.now();
+    google.script.run
+      .withSuccessHandler(r => {
+        if (!r || !r.ok) return;
+        state.dashLogs = r.data || [];
+        const box = $('dashActivity');
+        if (box) box.innerHTML = dashActivityHtml();
+      })
+      .withFailureHandler(() => { if (!state.dashLogs) state.dashLogs = []; const box = $('dashActivity'); if (box) box.innerHTML = dashActivityHtml(); })
+      .apiGetLogs({ limit: 8 });
+  }
+
+  const CHART_COLORS = ['#3b82f6', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#84cc16'];
+
+  function niceAxis(max) {
+    if (max <= 0) return { step: 1, top: 4 };
+    const raw = max / 4;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+    return { step, top: step * 4 };
+  }
+
+  function kampungChartHtml(list, perKampung) {
+    if (!list.length) return '<div class="act-empty">Belum ada kampung. Tambahkan di menu Atur.</div>';
+    const vals = list.map(k => perKampung[k] || 0);
+    const ax = niceAxis(Math.max.apply(null, vals));
+    let lines = '';
+    for (let i = 4; i >= 0; i--) {
+      lines += '<div class="bc-line"><span>' + (ax.step * i) + '</span></div>';
+    }
+    let cols = '';
+    list.forEach((k, i) => {
+      const v = vals[i];
+      const h = ax.top > 0 ? Math.max(v > 0 ? 2 : 0, (v / ax.top) * 100) : 0;
+      cols +=
+        '<button class="bc-col" type="button" data-kampung="' + esc(k) + '" title="' + esc(k) + ': ' + v + ' orang — klik untuk detail">' +
+          '<span class="bc-barwrap"><span class="bc-val">' + v + '</span><span class="bc-bar" style="height:' + h.toFixed(1) + '%;--c:' + CHART_COLORS[i % CHART_COLORS.length] + '"></span></span>' +
+          '<span class="bc-lbl">' + esc(k) + '</span>' +
+        '</button>';
+    });
+    return '<div class="bc-scroll"><div class="bc" style="--n:' + list.length + '"><div class="bc-lines">' + lines + '</div><div class="bc-cols">' + cols + '</div></div></div>';
+  }
+
+  function statCard(cls, icoTone, ico, label, value, sub, extra) {
+    return '<div class="stat-card ' + cls + '">' +
+      '<div class="sc-ico ico-' + icoTone + '">' + ico + '</div>' +
+      '<div class="stat-label">' + label + '</div>' +
+      '<div class="stat-value">' + value + '</div>' +
+      '<div class="stat-sub">' + sub + '</div>' + (extra || '') +
+    '</div>';
+  }
+
   function renderDashboardData() {
     const c = $('appContent');
     const d = state.dashboardCache;
     if (!d || !c) return;
-    const isUpdate = c.querySelector('.hero-number') !== null;
+    const isUpdate = c.querySelector('.js-total') !== null;
     const persen = Math.min(100, Math.round((d.total / (d.target || 500)) * 100));
     STATS_PER_KAMPUNG = d.perKampung || {};
     STATS_VERIFIED_PER_KAMPUNG = d.kampungVerified || {};
     const totalVerified = d.verified || 0;
     const totalUnverified = d.unverified || 0;
     const totalAll = d.total || 0;
-    const pctVerified = totalAll > 0 ? Math.round((totalVerified / totalAll) * 100) : 0;
+    const pct = n => totalAll > 0 ? Math.round((n / totalAll) * 100) : 0;
+    const pctVerified = pct(totalVerified);
     const pctUnverified = totalAll > 0 ? (100 - pctVerified) : 0;
     const totalDicetak = d.dicetak || 0;
     const totalBelumCetak = d.belumCetak || 0;
-    const pctDicetak = totalAll > 0 ? Math.round((totalDicetak / totalAll) * 100) : 0;
+    const pctDicetak = pct(totalDicetak);
     const pctBelumCetak = totalAll > 0 ? (100 - pctDicetak) : 0;
 
-    let kampungHtml = '';
     const list = d.kampungList || KAMPUNG_LIST;
     const targetMap = d.targetPerKampung || TARGET_PER_KAMPUNG;
     const verifiedMap = d.kampungVerified || {};
 
-    list.forEach(k => {
-      const jml = d.perKampung[k] || 0;
+    let kampungHtml = '';
+    list.forEach((k, i) => {
+      const jml = (d.perKampung || {})[k] || 0;
       const verifCount = verifiedMap[k] || 0;
       const target = parseInt(targetMap[k] || 0, 10);
-      const pct = target > 0 ? Math.min(100, Math.round((jml / target) * 100)) : 0;
-      let targetText = target > 0 ? (jml + ' / ' + target + ' • ' + pct + '%') : (jml + ' orang');
-      let verifInfo = '';
-      if (jml > 0) {
-        const pctV = Math.round((verifCount / jml) * 100);
-        verifInfo = ' • ✅ ' + verifCount + ' (' + pctV + '%)';
-      }
+      const p = target > 0 ? Math.min(100, Math.round((jml / target) * 100)) : 0;
+      const detail = (target > 0 ? (jml + ' / ' + target + ' • ' + p + '%') : (jml + ' orang')) +
+        (jml > 0 ? ' • ✅ ' + verifCount + ' (' + Math.round((verifCount / jml) * 100) + '%)' : '');
       kampungHtml +=
-        '<div class="kampung-item" data-kampung="' + esc(k) + '">' +
+        '<div class="kampung-item" data-kampung="' + esc(k) + '" style="--c:' + CHART_COLORS[i % CHART_COLORS.length] + '">' +
           '<div class="kampung-info">' +
             '<div class="kampung-ico">' + ICONS.home + '</div>' +
-            '<div>' +
+            '<div class="kampung-txt">' +
               '<div class="kampung-name">' + esc(k) + '</div>' +
-              '<div class="kampung-detail">' + targetText + verifInfo + '</div>' +
+              '<div class="kampung-detail">' + detail + '</div>' +
+              (target > 0 ? '<div class="kampung-bar"><div style="width:' + p + '%"></div></div>' : '') +
             '</div>' +
           '</div>' +
           '<div class="kampung-badge">' + jml + '<span class="arrow">' + ICONS.arrowRight + '</span></div>' +
@@ -649,59 +786,69 @@
 
     let warnHtml = '';
     if (d.unknownKampung && d.unknownKampung > 0) {
-      warnHtml = '<div style="background:#fef2f2;border-left:3px solid #dc2626;padding:12px 14px;border-radius:10px;margin-bottom:12px;font-size:12px;color:#991b1b">⚠️ Ada <b>' + d.unknownKampung + '</b> kampung di database yang tidak ada di daftar pengaturan. Buka <b>Atur</b> untuk memperbarui.</div>';
+      warnHtml = '<div class="alert alert-danger">' + ICONS.warn + '<div>Ada <b>' + d.unknownKampung + '</b> kampung di database yang tidak ada di daftar pengaturan. Buka <b>Atur</b> untuk memperbarui.</div></div>';
     }
 
+    const now = new Date();
+    const tgl = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta' });
+    const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }).replace('.', ':');
+    const nama = state.user ? (state.user.nama || state.user.username) : '';
+
+    const dateCard =
+      '<div class="date-chip">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' +
+        '<div><div class="dc-d">' + esc(tgl) + '</div><div class="dc-t">' + esc(jam) + ' WIB</div></div>' +
+      '</div>';
+
+    const totalCard =
+      '<div class="stat-card sc-total">' +
+        '<div class="sc-ico ico-blue">' + ICONS.users + '</div>' +
+        '<div class="stat-label">Total Pendukung</div>' +
+        '<div class="stat-value js-total hero-number' + (isUpdate ? ' bump' : '') + '">' + fmtNum(d.total) + '</div>' +
+        '<div class="stat-sub">Target: ' + fmtNum(d.target || 500) + ' orang</div>' +
+        '<div class="sc-progress"><div style="width:' + persen + '%"></div></div>' +
+        '<div class="sc-pct">' + persen + '% tercapai</div>' +
+      '</div>';
+
     c.innerHTML =
-      '<div class="hero-card">' +
-        '<div class="hero-top"><div class="hero-label">Total Pendukung</div><div class="hero-icon">' + ICONS.users + '</div></div>' +
-        '<div class="hero-number' + (isUpdate ? ' bump' : '') + '">' + d.total + '</div>' +
-        '<div class="hero-sub">Target: ' + (d.target || 500) + ' orang • ' + persen + '% tercapai</div>' +
-        '<div class="hero-progress"><div style="width:' + persen + '%"></div></div>' +
-      '</div>' + warnHtml +
-      '<div class="stat-grid">' +
-        '<div class="stat-card">' +
-          '<div class="stat-top"><span class="stat-label">Laki-laki</span><div class="stat-badge badge-blue">' + ICONS.male + '</div></div>' +
-          '<div class="stat-value">' + d.laki + '</div>' +
-          '<div class="stat-sub">' + (totalAll > 0 ? Math.round((d.laki / totalAll) * 100) : 0) + '% dari total</div>' +
-        '</div>' +
-        '<div class="stat-card">' +
-          '<div class="stat-top"><span class="stat-label">Perempuan</span><div class="stat-badge badge-pink">' + ICONS.female + '</div></div>' +
-          '<div class="stat-value">' + d.perempuan + '</div>' +
-          '<div class="stat-sub">' + (totalAll > 0 ? Math.round((d.perempuan / totalAll) * 100) : 0) + '% dari total</div>' +
-        '</div>' +
-        '<div class="stat-card verified-card">' +
-          '<div class="stat-top"><span class="stat-label">✅ Suara PASTI</span><div class="stat-badge badge-emerald">' + ICONS.shield + '</div></div>' +
-          '<div class="stat-value">' + totalVerified + '</div>' +
-          '<div class="stat-sub">' + pctVerified + '% sudah verifikasi TTD</div>' +
-        '</div>' +
-        '<div class="stat-card unverified-card">' +
-          '<div class="stat-top"><span class="stat-label">⏳ Suara Belum Pasti</span><div class="stat-badge badge-slate">' + ICONS.clock + '</div></div>' +
-          '<div class="stat-value">' + totalUnverified + '</div>' +
-          '<div class="stat-sub">' + pctUnverified + '% belum verifikasi</div>' +
-        '</div>' +
-        '<div class="stat-card printed-card">' +
-          '<div class="stat-top"><span class="stat-label">🖨️ Sudah Dicetak</span><div class="stat-badge badge-blue">' + ICONS.printer + '</div></div>' +
-          '<div class="stat-value">' + totalDicetak + '</div>' +
-          '<div class="stat-sub">' + pctDicetak + '% sudah print out</div>' +
-        '</div>' +
-        '<div class="stat-card unprinted-card">' +
-          '<div class="stat-top"><span class="stat-label">📄 Belum Dicetak</span><div class="stat-badge badge-slate">' + ICONS.printer + '</div></div>' +
-          '<div class="stat-value">' + totalBelumCetak + '</div>' +
-          '<div class="stat-sub">' + pctBelumCetak + '% belum print out</div>' +
-        '</div>' +
+      pageHead('Selamat Datang, ' + esc(nama) + ' <span class="wave">👋</span>', 'Kelola data pendukung dengan mudah dan cepat.', dateCard) +
+      warnHtml +
+      '<div class="stat-grid stat-grid-main">' +
+        totalCard +
+        statCard('sc-laki', 'blue', ICONS.male, 'Laki-laki', fmtNum(d.laki), pct(d.laki) + '% dari total') +
+        statCard('sc-perempuan', 'pink', ICONS.female, 'Perempuan', fmtNum(d.perempuan), pct(d.perempuan) + '% dari total') +
+        statCard('verified-card', 'green', ICONS.shield, 'Suara PASTI', fmtNum(totalVerified), pctVerified + '% sudah verifikasi TTD') +
       '</div>' +
-      '<div style="display:flex;gap:10px;margin-bottom:14px;padding:12px 14px;background:#f8fafc;border-radius:12px;border:1px dashed var(--border);font-size:11px;color:var(--text-sec);line-height:1.6">' +
-        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
-          '<div style="width:12px;height:12px;border-radius:3px;background:linear-gradient(135deg,var(--verified),var(--verified-dark))"></div>' +
-          '<b style="color:var(--verified-dark)">PASTI</b> = TTD + Fotokopi KTP' +
-        '</div>' +
-        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
-          '<div style="width:12px;height:12px;border-radius:3px;background:linear-gradient(135deg,#cbd5e1,#94a3b8)"></div>' +
-          '<b style="color:var(--unverified-dark)">BELUM</b> = Belum TTD' +
-        '</div>' +
+      '<div class="stat-grid stat-grid-sub">' +
+        statCard('unverified-card', 'slate', ICONS.clock, 'Suara Belum Pasti', fmtNum(totalUnverified), pctUnverified + '% belum verifikasi') +
+        statCard('printed-card', 'indigo', ICONS.printer, 'Sudah Dicetak', fmtNum(totalDicetak), pctDicetak + '% sudah print out') +
+        statCard('unprinted-card', 'amber', ICONS.printer, 'Belum Dicetak', fmtNum(totalBelumCetak), pctBelumCetak + '% belum print out') +
+        statCard('sc-kampung', 'violet', ICONS.home, 'Jumlah Kampung', fmtNum(list.length), 'wilayah terdata') +
       '</div>' +
-      '<div class="section-title">Data per Kampung <span style="font-size:11px;font-weight:500;color:var(--muted);margin-left:auto">👆 Klik untuk detail</span></div>' +
+
+      '<div class="dash-cols' + (isAdmin() ? '' : ' single') + '">' +
+        '<section class="card chart-card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span class="ct-ico">' + ICONS.home + '</span>Data Pendukung per Kampung</div>' +
+            '<span class="card-hint">Klik batang untuk detail</span>' +
+          '</div>' +
+          kampungChartHtml(list, d.perKampung || {}) +
+        '</section>' +
+        (isAdmin() ?
+        '<section class="card activity-card">' +
+          '<div class="card-head">' +
+            '<div class="card-title"><span class="ct-ico">' + ICONS.clock + '</span>Aktivitas Terbaru</div>' +
+            '<button class="card-link" id="btnAllLogs" type="button">Lihat Semua ' + ICONS.arrowRight + '</button>' +
+          '</div>' +
+          '<div id="dashActivity">' + dashActivityHtml() + '</div>' +
+        '</section>' : '') +
+      '</div>' +
+
+      '<div class="legend-note">' +
+        '<span><i class="lg-dot lg-verified"></i><b>PASTI</b> = TTD + Fotokopi KTP</span>' +
+        '<span><i class="lg-dot lg-unverified"></i><b>BELUM</b> = Belum TTD</span>' +
+      '</div>' +
+      '<div class="section-title">Rincian per Kampung <span class="st-hint">Klik untuk detail</span></div>' +
       '<div class="kampung-list">' + kampungHtml + '</div>';
 
     c.querySelectorAll('[data-kampung]').forEach(el => {
@@ -710,6 +857,9 @@
         if (k) openDetailKampung(k);
       });
     });
+    const allLogs = $('btnAllLogs');
+    if (allLogs) allLogs.addEventListener('click', () => setPage('logs'));
+    loadDashLogs(false);
   }
 
   // ============================================================ //
@@ -1452,44 +1602,72 @@
     });
 
     c.innerHTML =
-      '<div class="form-card">' +
-        '<div class="section-title" style="margin-top:0">Form Pendukung Baru</div>' +
-        '<div class="form-group">' +
-          '<label class="form-label">Nama Lengkap <span class="req">*</span></label>' +
-          '<input type="text" class="form-input" id="fNama" placeholder="Sesuai KTP" autocomplete="off">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label class="form-label">NIK <span class="req">*</span></label>' +
-          '<input type="tel" class="form-input" id="fNik" placeholder="16 digit angka" maxlength="16" inputmode="numeric" autocomplete="off">' +
-          '<div class="form-hint">🔒 NIK dicek otomatis — tidak boleh duplikat</div>' +
-          '<div class="nik-preview" id="nikPreview"></div>' +
-        '</div>' +
-        '<div class="form-row">' +
-          '<div class="form-group">' +
-            '<label class="form-label">Kampung <span class="req">*</span></label>' +
-            '<select class="form-select" id="fKampung">' + kampungOpts + '</select>' +
-          '</div>' +
-          '<div class="form-group">' +
-            '<label class="form-label">RT <span class="req">*</span></label>' +
-            '<select class="form-select" id="fRt">' + rtOpts + '</select>' +
-          '</div>' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label class="form-label">Foto KTP</label>' +
-          '<div class="foto-box" id="fotoBox">' +
-            '<div class="foto-placeholder" id="fotoPlaceholder">' +
-              '<div class="ico">' + ICONS.card + '</div>' +
-              'Ambil foto KTP langsung atau pilih dari galeri' +
+      pageHead('Form Pendukung Baru', 'Masukkan data pendukung sesuai dengan dokumen yang dimiliki.') +
+      '<div class="form-layout">' +
+        '<div class="form-main">' +
+          '<section class="form-section">' +
+            '<div class="fs-head"><span class="fs-ico">' + ICONS.users + '</span><h3>1. Data Diri</h3></div>' +
+            '<div class="form-row">' +
+              '<div class="form-group">' +
+                '<label class="form-label" for="fNama">Nama Lengkap <span class="req">*</span></label>' +
+                '<input type="text" class="form-input" id="fNama" placeholder="Masukkan nama lengkap" autocomplete="off">' +
+              '</div>' +
+              '<div class="form-group">' +
+                '<label class="form-label" for="fNik">NIK <span class="req">*</span></label>' +
+                '<input type="tel" class="form-input" id="fNik" placeholder="16 digit angka" maxlength="16" inputmode="numeric" autocomplete="off">' +
+                '<div class="form-hint">' + ICONS.shield + ' NIK dicek otomatis — tidak boleh duplikat</div>' +
+              '</div>' +
             '</div>' +
-            '<img id="fotoPreview" class="foto-preview" style="display:none" alt="">' +
-            '<div class="foto-btns">' +
-              '<button type="button" class="foto-btn primary" id="btnKamera">' + ICONS.camera + 'Kamera</button>' +
-              '<button type="button" class="foto-btn" id="btnGaleri">' + ICONS.gallery + 'Galeri</button>' +
+            '<div class="nik-preview" id="nikPreview"></div>' +
+          '</section>' +
+
+          '<section class="form-section">' +
+            '<div class="fs-head"><span class="fs-ico ico-green">' + ICONS.home + '</span><h3>2. Alamat</h3></div>' +
+            '<div class="form-row">' +
+              '<div class="form-group">' +
+                '<label class="form-label" for="fKampung">Kampung <span class="req">*</span></label>' +
+                '<select class="form-select" id="fKampung">' + kampungOpts + '</select>' +
+              '</div>' +
+              '<div class="form-group">' +
+                '<label class="form-label" for="fRt">RT <span class="req">*</span></label>' +
+                '<select class="form-select" id="fRt">' + rtOpts + '</select>' +
+              '</div>' +
             '</div>' +
-            '<button type="button" class="foto-hapus" id="btnHapusFoto" style="display:none">' + ICONS.trash + 'Hapus Foto</button>' +
+          '</section>' +
+
+          '<section class="form-section">' +
+            '<div class="fs-head"><span class="fs-ico ico-amber">' + ICONS.card + '</span><h3>3. Foto KTP</h3><span class="fs-opt">Opsional</span></div>' +
+            '<div class="foto-box" id="fotoBox">' +
+              '<div class="foto-placeholder" id="fotoPlaceholder">' +
+                '<div class="ico">' + ICONS.card + '</div>' +
+                'Ambil foto KTP langsung atau pilih dari galeri' +
+              '</div>' +
+              '<img id="fotoPreview" class="foto-preview" style="display:none" alt="">' +
+              '<div class="foto-btns">' +
+                '<button type="button" class="foto-btn primary" id="btnKamera">' + ICONS.camera + 'Kamera</button>' +
+                '<button type="button" class="foto-btn" id="btnGaleri">' + ICONS.gallery + 'Galeri</button>' +
+              '</div>' +
+              '<button type="button" class="foto-hapus" id="btnHapusFoto" style="display:none">' + ICONS.trash + 'Hapus Foto</button>' +
+            '</div>' +
+          '</section>' +
+
+          '<div class="form-actions">' +
+            '<button class="btn btn-primary" id="btnSubmit" type="button">' + ICONS.save + ' Simpan Data</button>' +
+            '<button class="btn btn-outline" id="btnResetForm" type="button">' + ICONS.refresh + ' Reset</button>' +
           '</div>' +
         '</div>' +
-        '<button class="btn btn-primary" id="btnSubmit" style="margin-top:8px" type="button">' + ICONS.save + ' Simpan Data</button>' +
+
+        '<aside class="form-aside">' +
+          '<div class="aside-card aside-hero">' +
+            '<div class="aside-art"><svg viewBox="0 0 120 96" fill="none"><rect x="14" y="10" width="72" height="80" rx="10" fill="#dbeafe"/><rect x="26" y="26" width="34" height="6" rx="3" fill="#93c5fd"/><rect x="26" y="40" width="46" height="6" rx="3" fill="#bfdbfe"/><rect x="26" y="54" width="28" height="6" rx="3" fill="#bfdbfe"/><circle cx="84" cy="66" r="22" fill="#3b82f6"/><circle cx="84" cy="60" r="7" fill="#fff"/><path d="M71 78c2-8 8-11 13-11s11 3 13 11" fill="#fff"/></svg></div>' +
+            '<h4>Pastikan Data Benar</h4>' +
+            '<p>Data yang Anda masukkan akan digunakan untuk verifikasi dan pencetakan KTP. Periksa kembali sebelum menyimpan.</p>' +
+          '</div>' +
+          '<div class="aside-card aside-secure">' +
+            '<div class="as-ico">' + ICONS.shield + '</div>' +
+            '<div><h5>Keamanan Data</h5><p>Data dijaga kerahasiaannya dan hanya dapat diakses oleh pengguna yang berwenang.</p></div>' +
+          '</div>' +
+        '</aside>' +
       '</div>';
 
     const fNik = $('fNik');
@@ -1504,6 +1682,7 @@
     $('galleryInput').onchange = handleGalleryFileForCrop;
     $('btnHapusFoto').addEventListener('click', clearFoto);
     $('btnSubmit').addEventListener('click', submitForm);
+    $('btnResetForm').addEventListener('click', () => { renderInput(); toast('Form direset', 'success'); });
   }
 
   function handleNikInput(nik, excludeId) {
@@ -1819,26 +1998,38 @@
     printOpts += '<option value="true"' + (state.filter.dicetak === 'true' ? ' selected' : '') + '>🖨️ Sudah Dicetak (' + countDicetak + ')</option>';
     printOpts += '<option value="false"' + (state.filter.dicetak === 'false' ? ' selected' : '') + '>📄 Belum Dicetak (' + countBelumCetak + ')</option>';
 
+    const countLaki = baseList.filter(x => x.jenisKelamin !== 'Perempuan').length;
+    const countPerempuan = countAll - countLaki;
+    const pctOf = n => countAll > 0 ? Math.round((n / countAll) * 100) : 0;
+    const miniStat = (tone, ico, label, val, sub) =>
+      '<div class="mini-stat"><div class="sc-ico ico-' + tone + '">' + ico + '</div>' +
+      '<div class="ms-body"><div class="ms-label">' + label + '</div><div class="ms-value">' + fmtNum(val) + '</div><div class="ms-sub">' + sub + '</div></div></div>';
+
+    const headActions = !isAdmin() ? '' :
+      '<button class="btn-tool btn-sel-mode' + (state.sel.on ? ' active' : '') + '" id="btnSelMode" type="button">' +
+        (state.sel.on ? ICONS.close + ' Keluar Ceklist' : ICONS.check + ' Ceklist Cetak') +
+      '</button>' +
+      '<button class="btn-tool btn-bulk-ktp" id="btnBulkKtp" type="button">' + ICONS.download + ' Download KTP</button>' +
+      '<button class="btn-tool btn-add" id="btnAddFromData" type="button">' + ICONS.plus + ' Tambah Pendukung</button>';
+
     c.innerHTML =
+      pageHead('Data Pendukung', 'Kelola data pendukung secara lengkap dan terstruktur.', headActions) +
+      '<div class="mini-stats">' +
+        miniStat('blue', ICONS.users, 'Total Pendukung', countAll, 'sesuai filter') +
+        miniStat('green', ICONS.male, 'Laki-laki', countLaki, pctOf(countLaki) + '%') +
+        miniStat('pink', ICONS.female, 'Perempuan', countPerempuan, pctOf(countPerempuan) + '%') +
+        miniStat('emerald', ICONS.shield, 'Suara PASTI', countVerified, pctOf(countVerified) + '%') +
+      '</div>' +
       '<div class="filter-bar">' +
         '<div class="filter-search">' + ICONS.search +
           '<input type="text" id="fSearch" placeholder="Cari nama atau NIK..." value="' + esc(state.filter.q) + '" autocomplete="off">' +
         '</div>' +
         '<div class="filter-row">' +
-          '<select id="fFilterKampung">' + kampungOpts + '</select>' +
-          '<select id="fFilterRt">' + rtOpts + '</select>' +
-          '<select id="fFilterVerified">' + verifiedOpts + '</select>' +
-          '<select id="fFilterDicetak">' + printOpts + '</select>' +
+          '<select id="fFilterKampung" aria-label="Filter kampung">' + kampungOpts + '</select>' +
+          '<select id="fFilterRt" aria-label="Filter RT">' + rtOpts + '</select>' +
+          '<select id="fFilterVerified" aria-label="Filter status suara">' + verifiedOpts + '</select>' +
+          '<select id="fFilterDicetak" aria-label="Filter status cetak">' + printOpts + '</select>' +
         '</div>' +
-      '</div>' +
-      '<div class="data-actions">' +
-        (!isAdmin() ? '' :
-        '<button class="btn-download btn-sel-mode' + (state.sel.on ? ' active' : '') + '" id="btnSelMode" type="button">' +
-          (state.sel.on ? ICONS.close + ' Keluar Ceklist' : ICONS.check + ' Ceklist Cetak') +
-        '</button>' +
-        '<button class="btn-download btn-bulk-ktp" id="btnBulkKtp" type="button">' +
-          ICONS.download + ' Download KTP' +
-        '</button>') +
       '</div>' +
       '<div class="grid-info" id="gridInfo"></div>' +
       '<div id="dataGridWrap"></div>' +
@@ -1875,6 +2066,7 @@
     });
 
     if (isAdmin()) {
+      $('btnAddFromData').addEventListener('click', () => setPage('input'));
       $('btnBulkKtp').addEventListener('click', () => {
         if (!state.allData) { toast('Data masih dimuat, tunggu sebentar', 'warn'); return; }
         window.__openBulkKtp();
@@ -1902,15 +2094,13 @@
     if (!wrap) return;
     const info = $('gridInfo');
     if (info) info.innerHTML = '<span>Memuat data...</span>';
-    let html = '<div class="data-grid">';
-    for (let i = 0; i < 6; i++) {
+    let html = '<div class="prow-list">';
+    for (let i = 0; i < 8; i++) {
       html +=
-        '<div class="person-card skeleton-card">' +
-          '<div class="skeleton skeleton-line" style="width:60%;height:16px;margin-bottom:12px"></div>' +
-          '<div class="skeleton skeleton-block" style="height:120px;margin-bottom:10px"></div>' +
-          '<div class="skeleton skeleton-line" style="width:80%;height:12px;margin-bottom:6px"></div>' +
-          '<div class="skeleton skeleton-line" style="width:70%;height:12px;margin-bottom:6px"></div>' +
-          '<div class="skeleton skeleton-line" style="width:50%;height:12px"></div>' +
+        '<div class="prow skeleton-card">' +
+          '<div class="skeleton skeleton-block" style="width:38px;height:38px;border-radius:12px"></div>' +
+          '<div style="flex:1;min-width:0"><div class="skeleton skeleton-line" style="width:45%;height:13px;margin-bottom:8px"></div>' +
+          '<div class="skeleton skeleton-line" style="width:30%;height:11px"></div></div>' +
         '</div>';
     }
     html += '</div>';
@@ -1981,66 +2171,66 @@
     const prevIds = animate ? state.prevIds : {};
     const newIds = {};
 
-    let html = '<div class="data-grid' + (selOn ? ' select-mode' : '') + '">';
-    pageItems.forEach(p => {
+    let html =
+      '<div class="prow-wrap">' +
+      '<div class="prow-head" aria-hidden="true">' +
+        '<span class="pc-no">No</span><span class="pc-name">Nama Lengkap</span><span class="pc-nik">NIK</span>' +
+        '<span class="pc-kampung">Kampung</span><span class="pc-rt">RT</span><span class="pc-jk">Jenis Kelamin</span>' +
+        '<span class="pc-status">Status</span>' + (isAdmin() ? '<span class="pc-act">Aksi</span>' : '<span class="pc-act">Detail</span>') +
+      '</div>' +
+      '<div class="prow-list' + (selOn ? ' select-mode' : '') + '">';
+    pageItems.forEach((p, i) => {
       newIds[p.id] = true;
       state.sel.pageIds.push(String(p.id));
       const isSel = selOn && !!state.sel.ids[p.id];
       const isNew = animate && !prevIds[p.id];
       const isP = p.jenisKelamin === 'Perempuan';
       const isVerified = p.verified === true;
-      const initials = (p.nama || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
-      const fotoUrl = p.fotoThumb || p.fotoKTP || '';
-      const cardClass = 'person-card ' + (isVerified ? 'verified-card' : 'unverified-card') + (isNew ? ' is-new' : '') + (isSel ? ' selected' : '');
-
-      const hasFotoKTP = !!(p.fotoKTPId && String(p.fotoKTPId).trim());
       const isPrinted = p.dicetak === true;
+      const hasFotoKTP = !!(p.fotoKTPId && String(p.fotoKTPId).trim());
+      const initials = initialsOf(p.nama);
+      const rowClass = 'prow ' + (isVerified ? 'verified-card' : 'unverified-card') + (isNew ? ' is-new' : '') + (isSel ? ' selected' : '');
+      const id = esc(p.id);
+
+      const actions = isAdmin() ?
+        '<button class="ra ra-verify' + (isVerified ? ' on' : '') + '" data-action="' + (isVerified ? 'unverify' : 'verify') + '" data-id="' + id + '" title="' + (isVerified ? 'Batalkan verifikasi' : 'Verifikasi (tandai sudah TTD)') + '" type="button">' + (isVerified ? ICONS.clock : ICONS.shield) + '</button>' +
+        '<button class="ra ra-print' + (isPrinted ? ' on' : '') + '" data-action="toggle-print" data-id="' + id + '" title="' + (isPrinted ? 'Tandai belum dicetak' : 'Tandai sudah dicetak') + '" type="button">' + ICONS.printer + '</button>' +
+        '<button class="ra ra-ktp" data-action="download-ktp" data-id="' + id + '" type="button"' + (hasFotoKTP ? ' title="Unduh KTP (A4)"' : ' disabled title="Belum ada foto KTP"') + '>' + ICONS.download + '</button>' +
+        '<button class="ra ra-edit" data-action="edit" data-id="' + id + '" title="Edit data" type="button">' + ICONS.edit + '</button>' +
+        '<button class="ra ra-del" data-action="del" data-id="' + id + '" data-nama="' + esc(p.nama) + '" title="Hapus data" type="button">' + ICONS.trash + '</button>'
+        :
+        '<button class="ra ra-view" data-action="detail" data-id="' + id + '" title="Lihat detail" type="button">' + ICONS.eye + '</button>';
 
       html +=
-        '<div class="' + cardClass + '" data-open-detail="' + esc(p.id) + '">' +
+        '<div class="' + rowClass + '" data-open-detail="' + id + '">' +
           (selOn ? '<div class="sel-check" aria-hidden="true">' + ICONS.check + '</div>' : '') +
-          (isAdmin() ?
-          '<div class="card-corner-actions">' +
-            '<button class="pc-print-corner' + (isPrinted ? ' printed' : '') + '" data-action="toggle-print" data-id="' + esc(p.id) + '" data-dicetak="' + (isPrinted ? '1' : '0') + '" title="' + (isPrinted ? 'Tandai belum dicetak' : 'Tandai sudah dicetak') + '" type="button">' + ICONS.check + '</button>' +
-            '<button class="pc-del-corner" data-action="del" data-id="' + esc(p.id) + '" data-nama="' + esc(p.nama) + '" title="Hapus data" type="button">' + ICONS.trash + '</button>' +
-          '</div>' : '') +
-          '<div class="person-head">' +
+          '<div class="pc-no">' + (startIdx + i + 1) + '</div>' +
+          '<div class="pc-name">' +
             '<div class="person-avatar' + (isP ? ' p' : '') + '">' + esc(initials) +
               (isVerified ? '<div class="verified-mark">' + ICONS.check + '</div>' : '') +
             '</div>' +
-            '<div class="person-info">' +
+            '<div class="pn-txt">' +
               '<div class="person-name" title="' + esc(p.nama) + '">' + esc(p.nama) + '</div>' +
-              '<div class="person-tags-row">' +
-                '<span class="person-tag' + (isP ? ' p' : '') + '">' + esc(p.jenisKelamin) + '</span>' +
-                '<span class="person-verify-tag ' + (isVerified ? 'verified' : 'unverified') + '">' +
-                  (isVerified ? ICONS.shield + ' SUARA PASTI' : ICONS.clock + ' BELUM PASTI') +
-                '</span>' +
-                '<span class="person-print-tag ' + (isPrinted ? 'printed' : 'unprinted') + '">' +
-                  ICONS.printer + (isPrinted ? ' SUDAH DICETAK' : ' BELUM DICETAK') +
-                '</span>' +
-              '</div>' +
+              '<div class="pn-sub"><span class="pn-nik">' + esc(p.nik) + '</span><span class="pn-loc">' + esc(p.kampung) + ' • ' + rtLabel(p.rt) + '</span></div>' +
             '</div>' +
           '</div>' +
-          (fotoUrl
-            ? '<img class="person-foto" data-src="' + esc(fotoUrl) + '" data-full="' + esc(p.fotoKTP || '') + '" alt="KTP ' + esc(p.nama) + '">'
-            : ''
-          ) +
-          '<div class="person-row"><b>NIK</b><span>' + esc(p.nik) + '</span></div>' +
-          '<div class="person-row"><b>Usia</b><span>' + (p.usia || '-') + ' tahun</span></div>' +
-          '<div class="person-row"><b>Kampung</b><span>' + esc(p.kampung) + '</span></div>' +
-          '<div class="person-row"><b>RT</b><span>' + rtLabel(p.rt) + '</span></div>' +
-          (isAdmin() ?
-          '<div class="person-actions">' +
-            (isVerified
-              ? '<button class="pc-unverify" data-action="unverify" data-id="' + esc(p.id) + '" title="Batalkan verifikasi" type="button">' + ICONS.clock + ' Batal</button>'
-              : '<button class="pc-verify" data-action="verify" data-id="' + esc(p.id) + '" title="Tandai sudah TTD" type="button">' + ICONS.shield + ' Verifikasi</button>'
-            ) +
-            '<button class="pc-edit" data-action="edit" data-id="' + esc(p.id) + '" type="button">' + ICONS.edit + ' Edit</button>' +
-            '<button class="pc-download" data-action="download-ktp" data-id="' + esc(p.id) + '" type="button"' + (hasFotoKTP ? '' : ' disabled title="Belum ada foto KTP"') + '>' + ICONS.download + ' KTP</button>' +
-          '</div>' : '') +
+          '<div class="pc-nik">' + esc(p.nik) + '</div>' +
+          '<div class="pc-kampung">' + esc(p.kampung) + '</div>' +
+          '<div class="pc-rt">' + rtLabel(p.rt) + '</div>' +
+          '<div class="pc-jk"><span class="person-tag' + (isP ? ' p' : '') + '">' + esc(p.jenisKelamin) + '</span></div>' +
+          '<div class="pc-status">' +
+            '<span class="person-verify-tag ' + (isVerified ? 'verified' : 'unverified') + '">' +
+              (isVerified ? ICONS.shield + ' Pasti' : ICONS.clock + ' Belum') +
+            '</span>' +
+            '<span class="person-print-tag ' + (isPrinted ? 'printed' : 'unprinted') + '">' +
+              ICONS.printer + (isPrinted ? ' Dicetak' : ' Belum cetak') +
+            '</span>' +
+          '</div>' +
+          '<div class="pc-act">' + actions + '</div>' +
+          '<div class="pc-chev" aria-hidden="true">' + ICONS.next + '</div>' +
         '</div>';
     });
-    html += '</div>';
+    html += '</div></div>';
     wrap.innerHTML = html;
 
     state.prevIds = newIds;
@@ -2134,7 +2324,8 @@
         e.stopPropagation();
         const action = btn.getAttribute('data-action');
         const id = btn.getAttribute('data-id');
-        if (!isAdmin() && action !== 'download-ktp') return; // role user: tombol tulis tidak ada & ditolak
+        if (action === 'detail') { window.__openDetailWarga(id); return; }
+        if (!isAdmin()) return; // role user: tombol tulis tidak ada & ditolak
         if (action === 'edit') window.__editData(id);
         else if (action === 'del') window.__deleteData(id, btn.getAttribute('data-nama'));
         else if (action === 'verify') window.__startVerify(id);
@@ -2143,8 +2334,6 @@
         else if (action === 'toggle-print') window.__togglePrint(id, btn);
         return;
       }
-
-      if (e.target.closest('img.person-foto')) return;
 
       const card = e.target.closest('[data-open-detail]');
       if (card) {
@@ -2341,6 +2530,7 @@
         '<div class="warga-avatar' + (isP ? ' p' : '') + '">' + esc(initials) + '</div>' +
         '<div class="warga-head-info">' +
           '<div class="warga-head-name">' + esc(p.nama) + '</div>' +
+          '<div class="warga-head-meta">' + esc(p.nik) + ' • ' + esc(p.kampung) + ', ' + rtLabel(p.rt) + '</div>' +
           '<span class="person-verify-tag ' + (isVerified ? 'verified' : 'unverified') + '" style="margin-top:6px">' +
             (isVerified ? ICONS.shield + ' SUARA PASTI' : ICONS.clock + ' BELUM PASTI') +
           '</span>' +
@@ -2349,14 +2539,6 @@
           '</span>' +
         '</div>' +
         '<button class="modal-close" id="btnCloseDetailWarga" type="button" title="Tutup">' + ICONS.close + '</button>' +
-      '</div>' +
-
-      '<div class="warga-section">' +
-        '<div class="warga-section-title">' + ICONS.card + ' Foto KTP</div>' +
-        (fotoKTP
-          ? '<img class="warga-foto" src="' + esc(fotoKTP) + '" alt="Foto KTP ' + esc(p.nama) + '" onclick="window.__showFoto(\'' + esc(fotoKTP) + '\')">'
-          : '<div class="warga-foto-empty">📷 Belum ada foto KTP</div>'
-        ) +
       '</div>' +
 
       '<div class="warga-section">' +
@@ -2369,6 +2551,14 @@
           '<div class="warga-info-row"><span class="lbl">Kampung</span><span class="val">' + esc(p.kampung) + '</span></div>' +
           '<div class="warga-info-row"><span class="lbl">RT</span><span class="val">' + rtLabel(p.rt) + '</span></div>' +
         '</div>' +
+      '</div>' +
+
+      '<div class="warga-section">' +
+        '<div class="warga-section-title">' + ICONS.card + ' Foto KTP</div>' +
+        (fotoKTP
+          ? '<img class="warga-foto" src="' + esc(fotoKTP) + '" alt="Foto KTP ' + esc(p.nama) + '" onclick="window.__showFoto(\'' + esc(fotoKTP) + '\')">'
+          : '<div class="warga-foto-empty">📷 Belum ada foto KTP</div>'
+        ) +
       '</div>' +
 
       '<div class="warga-section">' +
@@ -2387,9 +2577,13 @@
 
       (!isAdmin() ? '' : '<div class="warga-actions">' +
         (isVerified
-          ? '<button class="btn btn-outline" id="btnDetailUnverify" type="button" style="flex:1">' + ICONS.clock + ' Batal Verifikasi</button>'
-          : '<button class="btn btn-primary" id="btnDetailVerify" type="button" style="flex:1">' + ICONS.shield + ' Verifikasi Sekarang</button>'
+          ? '<button class="btn btn-outline wa-main" id="btnDetailUnverify" type="button">' + ICONS.clock + ' Batal Verifikasi</button>'
+          : '<button class="btn btn-primary wa-main" id="btnDetailVerify" type="button">' + ICONS.shield + ' Verifikasi Sekarang</button>'
         ) +
+        '<button class="btn wa-btn wa-edit" id="btnDetailEdit" type="button">' + ICONS.edit + ' Edit Data</button>' +
+        '<button class="btn wa-btn wa-print" id="btnDetailPrint" type="button">' + ICONS.printer + (isPrinted ? ' Tandai Belum Cetak' : ' Tandai Sudah Cetak') + '</button>' +
+        '<button class="btn wa-btn wa-ktp" id="btnDetailKtp" type="button"' + (p.fotoKTPId ? '' : ' disabled') + '>' + ICONS.download + ' Unduh KTP</button>' +
+        '<button class="btn wa-btn wa-del" id="btnDetailDel" type="button">' + ICONS.trash + ' Hapus Data</button>' +
       '</div>');
 
     const btnClose = $('btnCloseDetailWarga');
@@ -2406,6 +2600,13 @@
         window.__startVerify(p.id);
       });
     }
+
+    const closeDetail = () => { $('modalDetailWarga').classList.remove('show'); state.detailWargaId = null; };
+    const bindDetail = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', () => fn(el)); };
+    bindDetail('btnDetailEdit', () => { closeDetail(); window.__editData(p.id); });
+    bindDetail('btnDetailDel', () => { closeDetail(); window.__deleteData(p.id, p.nama); });
+    bindDetail('btnDetailPrint', el => { closeDetail(); window.__togglePrint(p.id, null); });
+    bindDetail('btnDetailKtp', el => window.__downloadKtpA4(p.id, el));
 
     const btnUnverify = $('btnDetailUnverify');
     if (btnUnverify) {
@@ -3665,6 +3866,6 @@
   // ============================================================ //
   // EKSPOR UNTUK pages.js (halaman admin & profil)                //
   // ============================================================ //
-  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, state: state };
+  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, setPage, state: state };
 
 })();

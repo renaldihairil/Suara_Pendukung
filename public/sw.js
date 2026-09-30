@@ -5,7 +5,7 @@
  *  - Navigasi (HTML)     : network-first → fallback cache → offline.html
  *  - /api/*              : network-only (data selalu fresh; foto no-store)
  * ============================================================ */
-const VERSION = 'pendukung-v2';
+const VERSION = 'pendukung-v3';
 const SHELL = [
   '/',
   '/index.html',
@@ -18,6 +18,10 @@ const SHELL = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/icons/logo-64.png',
+  '/icons/logo-512.png',
+  '/icons/apple-touch-icon.png',
+  '/icons/favicon-32.png',
   '/vendor/jspdf.umd.min.js',
   '/vendor/jspdf.plugin.autotable.min.js',
   '/vendor/cropper.min.js',

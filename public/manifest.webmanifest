@@ -1,14 +1,14 @@
 {
-  "name": "Data Pendukung Pak Emen — Pilkades 2026",
-  "short_name": "Pendukung",
+  "name": "Suara Pendukung — Pak Emen",
+  "short_name": "Suara Pendukung",
   "description": "Aplikasi data pendukung Pilkades — Admin & User (PWA)",
   "lang": "id",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#0d6e3f",
-  "theme_color": "#0d6e3f",
+  "background_color": "#f2f5fb",
+  "theme_color": "#0f2447",
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -23,7 +23,13 @@
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
