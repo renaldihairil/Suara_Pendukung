@@ -8,6 +8,8 @@ const store = require('../lib/store');
 const auth = require('../lib/auth');
 const sheets = require('../lib/gsheets');
 const drive = require('../lib/gdrive');
+const ocr = require('../lib/ocr');
+const ktp = require('../lib/ktp');
 
 const WRITE_ACTIONS = new Set([
   'add', 'update', 'delete', 'verifyWithTTD', 'unverify',
@@ -96,6 +98,25 @@ module.exports = async (req, res) => {
       case 'scanDuplikat':  r = await store.scanDuplikat(); break;
       case 'getConfig':     r = { ok: true, data: await store.readConfig() }; break;
       case 'countKampung':  r = await store.countKampung(params.nama); break;
+      case 'ocrKtp': {
+        // Baca Nama & NIK dari foto KTP (semua role terautentikasi; admin yang memakai form input)
+        const m = String(params.image || '').match(/^data:image\/[a-z+.-]+;base64,(.+)$/i);
+        const b64 = m ? m[1] : String(params.image || '');
+        if (!b64 || b64.length < 1000) { r = { ok: false, code: 'OCR_NOIMG', message: 'Foto tidak valid' }; break; }
+        if (b64.length > 4 * 1024 * 1024) { r = { ok: false, code: 'OCR_TOOBIG', message: 'Foto terlalu besar untuk dibaca' }; break; }
+        try {
+          const o = await ocr.recognize(b64);
+          const parsed = ktp.parseKtpText(o.text);
+          r = { ok: true, hasText: !!String(o.text).trim(), data: parsed };
+        } catch (e) {
+          if (e && e.code === 'OCR_DISABLED') {
+            r = { ok: false, code: 'OCR_DISABLED', message: 'Baca otomatis belum aktif di server (Cloud Vision API). Isi manual.' };
+          } else {
+            r = { ok: false, code: 'OCR_FAILED', message: 'Gagal membaca foto KTP: ' + (e && e.message ? e.message : 'unknown') };
+          }
+        }
+        break;
+      }
       case 'getFotoBase64': {
         const fileId = String(params.fileId || '').trim();
         if (!fileId) { r = { ok: false, message: 'File ID kosong' }; break; }

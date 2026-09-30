@@ -78,6 +78,14 @@ Admin menetapkan jadwal di **Atur → Hari H Pemilihan** (nama acara, tanggal, j
 ### Kuota Google Sheets API
 Google membatasi **60 permintaan baca per menit** per proyek. Aplikasi sudah dihemat: sheet dibaca berkelompok (`batchGet`), versi data di-cache 15 dtk, cek perubahan data tiap 30 dtk, dan pengecekan struktur sheet hanya sekali per 10 menit. Bila kuota tetap terlampaui, aplikasi menampilkan pesan *"Server sedang sibuk"* dan pulih sendiri dalam ±1 menit (Cloud Console → *APIs & Services → Sheets API → Quotas* bila ingin menaikkan batas).
 
+## 5c. Foto KTP: kamera berbingkai, putar/crop, baca otomatis Nama & NIK
+
+- **Kamera** (Input → Kamera): kamera langsung dengan bingkai rasio KTP (85,6 × 53,98 mm); yang tersimpan hanya isi bingkai. Ada indikator kualitas (gelap/silau/buram), senter & zoom bila didukung perangkat. Bila izin kamera ditolak, otomatis memakai kamera bawaan HP.
+- **Galeri / Putar / Crop**: editor dengan putar 90°, miringkan bebas −45°…+45°, zoom, crop rasio KTP atau bebas. Tombol **Putar / Crop** di bawah foto membuka ulang editor dari foto asli.
+- **Baca otomatis Nama & NIK**: setelah foto final, server membaca KTP memakai **Google Cloud Vision** (OCR) lalu `lib/ktp.js` menguraikan & memvalidasi NIK (kode wilayah, tanggal lahir, silang-cek dengan tanggal lahir di KTP). Hasil hanya **mengisi form** — tetap diperiksa manual sebelum Simpan. Bila tak yakin/foto kurang jelas, pengguna diminta isi manual.
+- **Mengaktifkan OCR (sekali)**: di Google Cloud Console project yang sama dengan Service Account → *APIs & Services → Library* → aktifkan **Cloud Vision API** (perlu billing aktif; gratis 1.000 gambar/bulan pertama). Tidak ada variabel env baru. Bila belum aktif, aplikasi tetap berjalan dan menampilkan "isi manual".
+- Privasi: foto KTP dikirim ke Google Vision hanya untuk dibaca; aplikasi tidak menyimpan hasil OCR.
+
 ## 6. Alur Kerja Git → Deploy
 
 ```bash
