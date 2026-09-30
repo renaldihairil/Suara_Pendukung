@@ -21,6 +21,17 @@
 // GANTI dengan teks acak panjang (min. 24 karakter), lalu salin nilai yang SAMA ke Vercel: APPSCRIPT_PHOTO_KEY
 const PGW_KEY = 'GANTI_DENGAN_KUNCI_ACAK_MIN_24_KARAKTER';
 
+/**
+ * JALANKAN SEKALI dari editor (pilih fungsi ini di dropdown → Jalankan) untuk memberi izin
+ * yang dibutuhkan jembatan (Drive, email akun, Dokumen untuk OCR). Setelah itu Terapkan → versi baru.
+ */
+function pgw_authorize_() {
+  DriveApp.getRootFolder();
+  const email = Session.getEffectiveUser().getEmail();
+  if (typeof DocumentApp !== 'undefined') DocumentApp.getActiveDocument;   // memicu izin Dokumen (untuk OCR)
+  Logger.log('Izin OK untuk: ' + email);
+}
+
 function pgw_out_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -46,8 +57,11 @@ function pgw_handle_(req) {
     if (!req.key || req.key !== PGW_KEY) return pgw_out_({ ok: false, message: 'Kunci salah' });
 
     switch (req.op) {
-      case 'ping':
-        return pgw_out_({ ok: true, user: Session.getEffectiveUser().getEmail() });
+      case 'ping': {
+        let who = '';
+        try { who = Session.getEffectiveUser().getEmail(); } catch (err) { who = '(email tidak dapat dibaca; izin belum diberikan)'; }
+        return pgw_out_({ ok: true, user: who });
+      }
 
       case 'upload': {
         if (!req.base64) return pgw_out_({ ok: false, message: 'Data foto kosong' });

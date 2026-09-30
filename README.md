@@ -115,12 +115,13 @@ Bila project Apps Script lama (yang terikat ke spreadsheet yang sama) masih ada,
    ```
    Bila belum ada, tambahkan fungsi di atas tanpa baris `handleRequest`.
 2. **File + → Skrip**, namai `PhotoGateway`, tempel seluruh isi [`apps-script/PhotoGateway.gs`](apps-script/PhotoGateway.gs).
-3. Ganti `PGW_KEY` dengan teks acak ≥ 24 karakter (simpan untuk langkah 6). **Simpan** (Ctrl+S).
-4. **Terapkan → Kelola deployment** → ikon pensil pada deployment Web App → **Versi: Versi baru** → **Terapkan**. Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: Siapa saja*. Salin **URL Web App** (berakhiran `/exec`). Bila Google meminta izin baru, izinkan.
-5. Vercel → Settings → Environment Variables:
+3. **Beri izin sekali:** di editor pilih fungsi `pgw_authorize_` pada dropdown fungsi → **Jalankan** → **Tinjau izin** → pilih akun → *Advanced → Go to … (unsafe)* → **Izinkan**. (Tanpa ini, `/api/health` menampilkan *You do not have permission to call …*.)
+4. Ganti `PGW_KEY` dengan teks acak ≥ 24 karakter (simpan untuk langkah 6). **Simpan** (Ctrl+S).
+5. **Terapkan → Kelola deployment** → ikon pensil pada deployment Web App → **Versi: Versi baru** → **Terapkan**. Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: Siapa saja*. Salin **URL Web App** (berakhiran `/exec`). Bila Google meminta izin baru, izinkan.
+6. Vercel → Settings → Environment Variables:
    - `APPSCRIPT_PHOTO_URL` = URL Web App (type **Config**)
    - `APPSCRIPT_PHOTO_KEY` = nilai `PGW_KEY` (type **Secret**)
-6. **Redeploy**, lalu cek `/api/health` → `"drive":{"mode":"appscript","ok":true,"akun":"email-anda"}`.
+7. **Redeploy**, lalu cek `/api/health` → `"drive":{"mode":"appscript","ok":true,"akun":"email-anda"}`.
 
 ### Baca otomatis Nama & NIK GRATIS lewat jembatan yang sama (OCR bawaan Google Drive)
 Jembatan juga punya operasi `ocr` yang memakai OCR Google Drive (gratis, berjalan atas nama akun Anda, tanpa billing). Tambahan langkah sekali saja di Apps Script:
