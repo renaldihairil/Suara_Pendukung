@@ -243,7 +243,18 @@ svg{display:block}
 .stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px}
 .stat-card{background:var(--card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow-sm);border:1px solid var(--border);transition:transform .2s,box-shadow .2s,border-color .2s;position:relative;min-width:0}
 .stat-card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:#d3dcee}
-.sc-total{grid-column:1/-1}
+.sc-total{grid-column:span 2;position:relative;overflow:hidden;color:#fff;background:linear-gradient(135deg,#1e40af 0%,#2563eb 55%,#3b82f6 100%);border-color:transparent;box-shadow:0 14px 30px rgba(37,99,235,.32)}
+.sc-total::before{content:'';position:absolute;width:220px;height:220px;right:-60px;top:-90px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.22),transparent 70%);pointer-events:none}
+.sc-total::after{content:'';position:absolute;width:140px;height:140px;right:70px;bottom:-90px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.12),transparent 70%);pointer-events:none}
+.sc-total:hover{border-color:transparent;box-shadow:0 18px 38px rgba(37,99,235,.4)}
+.sc-total>*{position:relative;z-index:1}
+.sc-total .sc-ico{background:rgba(255,255,255,.2);color:#fff}
+.sc-total .stat-label{color:rgba(255,255,255,.85)}
+.sc-total .stat-value{color:#fff;font-size:34px}
+.sc-total .stat-sub{color:rgba(255,255,255,.8)}
+.sc-total .sc-progress{background:rgba(255,255,255,.25)}
+.sc-total .sc-progress>div{background:linear-gradient(90deg,#fbbf24,#fde68a);box-shadow:0 0 12px rgba(251,191,36,.6)}
+.sc-total .sc-pct{color:#fff}
 .sc-ico{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;flex-shrink:0}
 .sc-ico svg{width:20px;height:20px}
 .ico-blue{background:#dbeafe;color:#2563eb}
@@ -1243,8 +1254,8 @@ body.sel-mode .toast{bottom:270px}
 @media(min-width:640px){
   .ph-title{font-size:24px}
   .date-chip{display:flex}
-  .stat-grid-main,.stat-grid-sub{grid-template-columns:repeat(4,minmax(0,1fr))}
-  .sc-total{grid-column:auto}
+  .stat-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .sc-total .stat-value{font-size:40px}
   .mini-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
   .kampung-list{grid-template-columns:repeat(2,minmax(0,1fr))}
   .form-row{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1273,7 +1284,6 @@ body.sel-mode .toast{bottom:270px}
   /* modal sebagai kartu di tengah tetap; bottom sheet hanya di HP */
 }
 @media(max-width:639px){
-  .stat-grid-main .verified-card{grid-column:1/-1}
   .ph-right{width:100%}
   .ph-right .btn-tool{flex:1}
   .ph-right .btn-add{display:none}
