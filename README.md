@@ -105,7 +105,15 @@ Tanpa variabel itu aplikasi tetap jalan: data tersimpan, hanya foto yang gagal (
 
 Bila project Apps Script lama (yang terikat ke spreadsheet yang sama) masih ada, foto bisa disimpan lewat **Web App Apps Script** milik Anda. Skrip berjalan atas nama akun Anda sehingga foto masuk ke Drive Anda (folder `FOTO_KTP_PENDUKUNG_2026` / `FOTO_BUKTI_TTD_2026` yang sama, foto lama tetap terbaca) dan **tidak ada token yang kedaluwarsa**.
 
-1. Di project Apps Script, tekan **Ctrl+F** cari `doPost` di semua file. Bila **sudah ada**, beri tahu saya (nama fungsinya perlu disesuaikan).
+1. Di project Apps Script, tekan **Ctrl+F** cari `doPost`. Bila **sudah ada** (mis. `function doPost(e){ return handleRequest(e); }`), ubah menjadi:
+   ```js
+   function doPost(e) {
+     const pg = pgw_tryHandle_(e);   // jembatan foto
+     if (pg) return pg;
+     return handleRequest(e);        // aplikasi lama
+   }
+   ```
+   Bila belum ada, tambahkan fungsi di atas tanpa baris `handleRequest`.
 2. **File + → Skrip**, namai `PhotoGateway`, tempel seluruh isi [`apps-script/PhotoGateway.gs`](apps-script/PhotoGateway.gs).
 3. Ganti `PGW_KEY` dengan teks acak ≥ 24 karakter (simpan untuk langkah 6). **Simpan** (Ctrl+S).
 4. **Terapkan → Kelola deployment** → ikon pensil pada deployment Web App → **Versi: Versi baru** → **Terapkan**. Pastikan *Jalankan sebagai: Saya* dan *Yang memiliki akses: Siapa saja*. Salin **URL Web App** (berakhiran `/exec`). Bila Google meminta izin baru, izinkan.
