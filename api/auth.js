@@ -8,9 +8,7 @@
  * ============================================================ */
 const store = require('../lib/store');
 const auth = require('../lib/auth');
-const sheets = require('../lib/gsheets');
 
-let bootstrapped = false;
 
 /* --- Rate limit login sederhana (per proses/serverless instance) --- */
 const fails = new Map(); // ip → { count, until }
@@ -41,14 +39,8 @@ function json(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-async function ensureBootstrap() {
-  if (bootstrapped) return;
-  await sheets.ensureSheets();
-  await auth.ensureBootstrapAdmin();
-  bootstrapped = true;
-}
 
-module.exports = async (req, res) => {
+async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.setHeader('Allow', 'GET, POST, OPTIONS');
@@ -61,7 +53,7 @@ module.exports = async (req, res) => {
     if (!session) return json(res, 200, { ok: false });
     // Validasi ulang ke sheet: user masih ada & aktif?
     try {
-      const users = await auth.listUsers();
+      const users = await auth.listUsers(false);
       const u = users.find(x => x.id === session.userId);
       if (!u || !u.aktif) {
         res.setHeader('Set-Cookie', auth.clearSessionCookie());
@@ -106,7 +98,7 @@ module.exports = async (req, res) => {
   }
 
   try {
-    await ensureBootstrap();
+    // Satu bacaan sheet Users (ter-cache); pembuatan sheet/admin awal hanya bila Users masih kosong
     const result = await auth.authenticate(body.username, body.password);
     if (!result.ok) {
       recordFail(ip);
@@ -114,8 +106,11 @@ module.exports = async (req, res) => {
       return json(res, 200, { ok: false, message: result.message });
     }
     clearFails(ip);
-    await auth.touchLastLogin(result.user);
-    await store.logAksi('LOGIN', result.user.username, 'Login berhasil');
+    // dua tulisan kecil dijalankan BERSAMAAN (tidak berurutan) agar login cepat
+    await Promise.all([
+      auth.touchLastLogin(result.user),
+      store.logAksi('LOGIN', result.user.username, 'Login berhasil')
+    ]);
     res.setHeader('Set-Cookie', auth.sessionCookie(auth.signSession(result.user)));
     return json(res, 200, {
       ok: true,
@@ -123,5 +118,15 @@ module.exports = async (req, res) => {
     });
   } catch (err) {
     return json(res, 500, { ok: false, message: 'Error: ' + (err && err.message ? err.message : 'unknown') });
+  }
+}
+
+// Pengaman: apa pun yang terjadi, balas JSON (bukan halaman error Vercel) agar aplikasi bisa menampilkan pesan jelas
+module.exports = async (req, res) => {
+  try {
+    return await handler(req, res);
+  } catch (err) {
+    console.error('[auth]', err);
+    if (!res.headersSent) return json(res, 500, { ok: false, message: 'Error server: ' + (err && err.message ? err.message : 'unknown') });
   }
 };

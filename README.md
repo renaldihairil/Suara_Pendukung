@@ -49,7 +49,7 @@ mock/         Dev server lokal dengan Google di-mock (QA tanpa kredensial)
 ### B. Vercel
 1. [vercel.com](https://vercel.com) → **Add New → Project** → pilih repo GitHub ini → Framework **Other** → Deploy.
 2. **Settings → Environment Variables** (lihat tabel bagian 4) → **Redeploy**.
-3. **Settings → Functions → Function Region → Singapore (sin1)** agar respons lebih cepat dari Indonesia (lalu Redeploy).
+3. Region fungsi sudah diatur ke **Singapura (sin1)** lewat `vercel.json` — tidak perlu diubah manual.
 4. Buka `https://<app>.vercel.app/api/health` → harus `{"ok":true,"spreadsheet":true,...}`.
 5. Login dengan `ADMIN_USERNAME`/`ADMIN_PASSWORD` (akun admin dibuat otomatis) → **Akun → Ganti Password**.
 
@@ -127,10 +127,13 @@ Lalu: **Simpan** → jalankan **`pgwAuthorize`** (dialog izin kini memuat keempa
 
 ## 7. Kinerja
 
-- **Cache baca sheet** (`lib/gsheets.js`, TTL 5–10 dtk): dashboard/daftar/versi/cek NIK yang datang bersamaan memakai satu bacaan ke Google Sheets. Bacaan sebelum **menulis** selalu *fresh* (nomor baris akurat).
-- Perubahan dari aplikasi Apps Script lama / instance lain bisa tampil terlambat ≤ 10 detik.
-- Foto di-cache privat di perangkat 1 hari (`/api/photo`); pustaka PDF/crop dimuat `defer`; font tidak memblokir tampilan pertama; service worker men-cache *app shell*.
-- **Function Region Singapore** (bagian 3B) memangkas latensi untuk pengguna Indonesia.
+- **Paket ringan `@googleapis/sheets`** (±3 MB, dimuat ±60 ms) menggantikan `googleapis` penuh (±112 MB, dimuat ±1 dtk) → *cold start* fungsi jauh lebih cepat.
+- **Login**: satu bacaan sheet Users (ter-cache); pembuatan sheet/admin awal hanya bila Users kosong; catat last-login & log dilakukan bersamaan.
+- **Satu permintaan setelah login** (`getBootstrap`): config + dashboard + daftar + versi + badge duplikat + aktivitas terbaru dalam satu panggilan (dulu 5–6 permintaan terpisah).
+- **Cache baca sheet** (`lib/gsheets.js`, TTL 5–10 dtk). Bacaan sebelum **menulis** selalu *fresh*. Perubahan dari aplikasi Apps Script lama tampil ≤ 10 dtk.
+- **Region fungsi Singapura** (`"regions": ["sin1"]` di `vercel.json`) — terdekat ke Indonesia.
+- Foto di-cache privat 1 hari; pustaka PDF/crop `defer`; font tidak memblokir render; service worker men-cache *app shell*.
+- Server selalu membalas JSON; bila Vercel memotong/gagal, layar login menampilkan pesan jelas (bukan teks error mentah).
 - Kuota Google Sheets 60 baca/menit: bila terlampaui muncul *"Server sedang sibuk"* dan pulih sendiri ±1 menit.
 
 ## 8. Diagnosis cepat: `/api/health`
