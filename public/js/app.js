@@ -1982,16 +1982,41 @@
       im.src = imgUrl;
     } catch (e) { /* abaikan */ }
 
-    google.script.run
-      .withSuccessHandler(r => {
-        if (token !== state.ocrToken || !$('ocrSt')) return;
-        showOcrResult(r, tip);
-      })
-      .withFailureHandler(e => {
-        if (token !== state.ocrToken || !$('ocrSt')) return;
-        setOcrStatus('err', '⚠️ Gagal membaca otomatis (' + esc(e && e.message ? e.message : 'error') + '). Isi Nama & NIK secara manual.');
-      })
-      .apiOcrKtp({ image: imgUrl });
+    shrinkForOcr(imgUrl, small => {
+      if (token !== state.ocrToken || !$('ocrSt')) return;
+      google.script.run
+        .withSuccessHandler(r => {
+          if (token !== state.ocrToken || !$('ocrSt')) return;
+          showOcrResult(r, tip);
+        })
+        .withFailureHandler(e => {
+          if (token !== state.ocrToken || !$('ocrSt')) return;
+          setOcrStatus('err', '⚠️ Gagal membaca otomatis (' + esc(e && e.message ? e.message : 'error') + '). Isi Nama & NIK secara manual.');
+        })
+        .apiOcrKtp({ image: small });
+    });
+  }
+
+  // Kecilkan foto untuk OCR: maks. 1600px & ±700KB (batas OCR.space gratis 1MB; upload lebih cepat)
+  function shrinkForOcr(dataUrl, cb) {
+    const img = new Image();
+    img.onload = () => {
+      const tries = [[1600, 0.88], [1400, 0.78], [1100, 0.7]];
+      let out = dataUrl;
+      for (const [maxSide, q] of tries) {
+        const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+        const g = c.getContext('2d');
+        g.imageSmoothingQuality = 'high';
+        g.drawImage(img, 0, 0, c.width, c.height);
+        out = c.toDataURL('image/jpeg', q);
+        if (out.length < 950000) break;
+      }
+      cb(out);
+    };
+    img.onerror = () => cb(dataUrl);
+    img.src = dataUrl;
   }
 
   function showOcrResult(r, tip) {
@@ -2075,7 +2100,7 @@
             btn.disabled = false;
             btn.innerHTML = ICONS.save + ' Simpan Data';
             if (r.ok) {
-              toast('✅ ' + r.message, 'success');
+              if (r.fotoGagal) toast('⚠️ ' + r.message, 'warn'); else toast('✅ ' + r.message, 'success');
               if (r.version) state.version = r.version;
               $('fNama').value = '';
               $('fNik').value = '';

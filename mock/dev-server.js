@@ -128,12 +128,16 @@ const driveApi = {
       if (opts.requestBody && opts.requestBody.mimeType === 'application/vnd.google-apps.folder') {
         mockFiles[id] = { id, isFolder: true, name: opts.requestBody.name };
       } else {
+        // Meniru googleapis asli: media.body WAJIB stream (Buffer → "part.body.pipe is not a function")
         const body = opts.media && opts.media.body;
+        if (!body || typeof body.pipe !== 'function') throw new TypeError('part.body.pipe is not a function');
+        const chunks = [];
+        for await (const c of body) chunks.push(Buffer.from(c));
         mockFiles[id] = {
           id,
           name: (opts.requestBody && opts.requestBody.name) || 'file',
           mime: (opts.media && opts.media.mimeType) || 'image/jpeg',
-          bytes: Buffer.isBuffer(body) ? Buffer.from(body) : Buffer.alloc(0)
+          bytes: Buffer.concat(chunks)
         };
       }
       return { data: { id } };

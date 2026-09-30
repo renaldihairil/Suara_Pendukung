@@ -84,6 +84,8 @@ Google membatasi **60 permintaan baca per menit** per proyek. Aplikasi sudah dih
 - **Galeri / Putar / Crop**: editor dengan putar 90°, miringkan bebas −45°…+45°, zoom, crop rasio KTP atau bebas. Tombol **Putar / Crop** di bawah foto membuka ulang editor dari foto asli.
 - **Baca otomatis Nama & NIK**: setelah foto final, server membaca KTP memakai **Google Cloud Vision** (OCR) lalu `lib/ktp.js` menguraikan & memvalidasi NIK (kode wilayah, tanggal lahir, silang-cek dengan tanggal lahir di KTP). Hasil hanya **mengisi form** — tetap diperiksa manual sebelum Simpan. Bila tak yakin/foto kurang jelas, pengguna diminta isi manual.
 - **Mengaktifkan OCR (sekali)**: di Google Cloud Console project yang sama dengan Service Account → *APIs & Services → Library* → aktifkan **Cloud Vision API** (perlu billing aktif; gratis 1.000 gambar/bulan pertama). Tidak ada variabel env baru. Bila belum aktif, aplikasi tetap berjalan dan menampilkan "isi manual".
+- **Tanpa billing Google? Pakai OCR.space (gratis, tanpa kartu)**: daftar API key gratis di ocr.space, lalu di Vercel → Settings → Environment Variables tambahkan `OCRSPACE_API_KEY` (Redeploy). Bila Google Vision belum bisa dipakai (billing/API belum aktif), aplikasi otomatis memakai OCR.space; `OCR_PROVIDER=ocrspace` memaksa OCR.space saja. Akurasi OCR.space di bawah Google Vision, tetapi validasi NIK tetap menolak hasil yang tidak wajar.
+- Foto KTP gagal diunggah ke Google Drive **tidak lagi membatalkan simpan data** (data tersimpan + peringatan; foto bisa diunggah ulang lewat Edit). Saat edit, foto lama dibuang hanya setelah foto baru sukses.
 - Privasi: foto KTP dikirim ke Google Vision hanya untuk dibaca; aplikasi tidak menyimpan hasil OCR.
 
 ## 6. Alur Kerja Git → Deploy
