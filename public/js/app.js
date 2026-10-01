@@ -1259,7 +1259,7 @@
       '</div>' +
 
       '<div class="legend-note">' +
-        '<span><i class="lg-dot lg-verified"></i><b>PASTI</b> = TTD + Fotokopi KTP</span>' +
+        '<span><i class="lg-dot lg-verified"></i><b>PASTI</b> = Fotokopi KTP ber-TTD / TTD digital</span>' +
         '<span><i class="lg-dot lg-unverified"></i><b>BELUM</b> = Belum TTD</span>' +
       '</div>' +
       '<div class="section-title">Rincian per Kampung <span class="st-hint">Klik untuk detail</span></div>' +
@@ -3198,10 +3198,10 @@
       '</div>' +
 
       '<div class="warga-section">' +
-        '<div class="warga-section-title">' + ICONS.ttd + ' Bukti Fotokopi KTP yang Ditandatangani</div>' +
+        '<div class="warga-section-title">' + ICONS.ttd + (p.metodeTTD === 'digital' ? ' Bukti Tanda Tangan Digital' : ' Bukti Fotokopi KTP yang Ditandatangani') + '</div>' +
         (fotoTTD
           ? '<div class="foto-wrap is-loading"><span class="foto-spin"></span><img class="warga-foto" decoding="async" src="' + esc(fotoTTD) + '" alt="Bukti TTD ' + esc(p.nama) + '" onload="this.parentNode.classList.remove(\'is-loading\')" onerror="this.parentNode.classList.remove(\'is-loading\');this.parentNode.classList.add(\'is-err\')" onclick="window.__showFoto(\'' + esc(fotoTTD) + '\')"></div>' +
-            '<div class="warga-ttd-note">✅ Sudah diverifikasi dengan bukti TTD</div>'
+            '<div class="warga-ttd-note">✅ ' + (p.metodeTTD === 'digital' ? 'Diverifikasi dengan tanda tangan digital' : 'Sudah diverifikasi dengan bukti fotokopi KTP ber-TTD') + '</div>'
           : '<div class="warga-foto-empty">' +
               (isVerified
                 ? '⚠️ Status PASTI tapi bukti TTD belum diupload'
@@ -3264,6 +3264,9 @@
     state.verifyId = id;
     state.verifyFotoTTDBase64 = null;
     state.verifyFotoTTDMime = null;
+    let m = 'foto';
+    try { m = localStorage.getItem('pendukung_verif_metode') === 'digital' ? 'digital' : 'foto'; } catch (e) {}
+    state.verifyMetode = m;                       // pilihan terakhir diingat di perangkat ini
 
     renderModalVerifTTD(p);
     $('modalVerifTTD').classList.add('show');
@@ -3280,7 +3283,7 @@
       '<div class="verif-head">' +
         '<div class="verif-icon">' + ICONS.shield + '</div>' +
         '<h3>Verifikasi Suara PASTI</h3>' +
-        '<p>Upload bukti fotokopi KTP yang sudah ditandatangani warga</p>' +
+        '<p id="verifSub">Pilih cara verifikasi: fotokopi KTP ber-TTD atau tanda tangan digital</p>' +
       '</div>' +
 
       '<div class="verif-info">' +
@@ -3292,7 +3295,12 @@
         '</div>' +
       '</div>' +
 
-      '<div class="verif-upload">' +
+      '<div class="verif-tabs" role="tablist">' +
+        '<button type="button" role="tab" class="verif-tab" data-metode="foto">' + ICONS.camera + '<span>Fotokopi KTP</span></button>' +
+        '<button type="button" role="tab" class="verif-tab" data-metode="digital">' + ICONS.ttd + '<span>TTD Digital</span></button>' +
+      '</div>' +
+
+      '<div class="verif-upload" id="verifPanelFoto">' +
         '<label class="form-label">📸 Bukti Fotokopi KTP yang Ditandatangani <span class="req">*</span></label>' +
         '<div class="foto-box" id="verifTTDBox">' +
           '<div class="foto-placeholder" id="verifTTDPlaceholder">' +
@@ -3309,6 +3317,12 @@
         '<div class="form-hint" style="margin-top:8px">⚠️ Wajib upload bukti TTD untuk verifikasi</div>' +
       '</div>' +
 
+      '<div class="verif-digital" id="verifPanelDigital" style="display:none">' +
+        '<div class="verif-statement" id="verifStatement"></div>' +
+        '<div id="verifPad"></div>' +
+        '<div class="form-hint" style="margin-top:8px">✍️ Serahkan HP ke warga untuk tanda tangan langsung di layar. Tersimpan sebagai lembar bukti beserta nama, NIK, waktu & saksi.</div>' +
+      '</div>' +
+
       '<div class="confirm-btns" style="margin-top:20px">' +
         '<button class="btn btn-outline" id="btnVerifCancel" type="button">Batal</button>' +
         '<button class="btn btn-primary" id="btnVerifSave" type="button">' + ICONS.shield + ' Verifikasi</button>' +
@@ -3321,6 +3335,42 @@
     $('btnVerifHapus').addEventListener('click', clearVerifFoto);
     $('btnVerifCancel').addEventListener('click', closeModalVerif);
     $('btnVerifSave').addEventListener('click', doVerifyWithTTD);
+    $('verifStatement').textContent = pernyataanDukungan(p);
+    document.querySelectorAll('#modalVerifTTDContent .verif-tab').forEach(b =>
+      b.addEventListener('click', () => setVerifMetode(b.getAttribute('data-metode'))));
+    setVerifMetode(state.verifyMetode || 'foto');
+  }
+
+  function pernyataanDukungan(p) {
+    return 'Saya, ' + (p.nama || '') + ', dengan sadar dan tanpa paksaan menyatakan memberikan dukungan kepada ' +
+      (NAMA_KANDIDAT || 'calon kepala desa') + ' pada ' + (NAMA_PILKADES || 'pemilihan kepala desa') + '.';
+  }
+
+  /** Ganti cara verifikasi: 'foto' (unggah fotokopi KTP ber-TTD) | 'digital' (tanda tangan di layar) */
+  function setVerifMetode(m) {
+    m = m === 'digital' ? 'digital' : 'foto';
+    state.verifyMetode = m;
+    try { localStorage.setItem('pendukung_verif_metode', m); } catch (e) {}
+    document.querySelectorAll('#modalVerifTTDContent .verif-tab').forEach(b => {
+      const on = b.getAttribute('data-metode') === m;
+      b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $('verifPanelFoto').style.display = m === 'foto' ? '' : 'none';
+    $('verifPanelDigital').style.display = m === 'digital' ? '' : 'none';
+    $('verifSub').textContent = m === 'digital'
+      ? 'Warga menandatangani langsung di layar HP ini'
+      : 'Upload bukti fotokopi KTP yang sudah ditandatangani warga';
+    if (m === 'digital' && !state.verifyPad && window.TtdPad) {
+      state.verifyPad = window.TtdPad.create($('verifPad'), { onChange: updateVerifBtn });
+    }
+    updateVerifBtn();
+  }
+
+  function updateVerifBtn() {
+    const btn = $('btnVerifSave');
+    if (!btn || btn.dataset.busy) return;
+    const m = state.verifyMetode;
+    btn.innerHTML = ICONS.shield + (m === 'digital' ? ' Simpan & Verifikasi' : ' Verifikasi');
   }
 
   function handleVerifFotoInput(e) {
@@ -3352,6 +3402,7 @@
 
   function closeModalVerif() {
     $('modalVerifTTD').classList.remove('show');
+    if (state.verifyPad) { state.verifyPad.destroy(); state.verifyPad = null; }
     state.verifyId = null;
     state.verifyFotoTTDBase64 = null;
     state.verifyFotoTTDMime = null;
@@ -3359,16 +3410,36 @@
 
   function doVerifyWithTTD() {
     if (!state.verifyId) { toast('Data tidak valid', 'error'); return; }
-    if (!state.verifyFotoTTDBase64) { toast('Bukti TTD wajib diupload', 'error'); return; }
+    const metode = state.verifyMetode === 'digital' ? 'digital' : 'foto';
+    let ttdData = state.verifyFotoTTDBase64, ttdMime = state.verifyFotoTTDMime;
+    if (metode === 'digital') {
+      const pad = state.verifyPad;
+      if (!pad || pad.isEmpty()) { toast('Warga belum menandatangani', 'error'); return; }
+      if (pad.isTooShort()) { toast('Tanda tangan terlalu singkat — minta warga tanda tangan dengan jelas', 'error'); return; }
+      const p0 = (state.allData || []).find(x => String(x.id) === String(state.verifyId)) || {};
+      const u = state.user || {};
+      const now = new Date();
+      const waktu = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: HH_ZONE }) +
+        ' pukul ' + now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: HH_ZONE }).replace('.', ':') + ' ' + HH_LABEL;
+      ttdData = pad.toProof({
+        nama: p0.nama, nik: p0.nik, kampung: p0.kampung, rt: rtLabel(p0.rt),
+        pernyataan: pernyataanDukungan(p0), waktu,
+        saksi: (u.nama || u.username || '') + (u.role ? ' (' + ROLE_LABEL[userRole()] + ')' : ''),
+        aplikasi: 'Suara Pendukung'
+      });
+      ttdMime = 'image/jpeg';
+    } else if (!ttdData) { toast('Bukti TTD wajib diupload', 'error'); return; }
 
     const btn = $('btnVerifSave');
+    btn.dataset.busy = '1';
     btn.disabled = true;
     btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Memverifikasi...';
 
     google.script.run
       .withSuccessHandler(r => {
+        delete btn.dataset.busy;
         btn.disabled = false;
-        btn.innerHTML = ICONS.shield + ' Verifikasi';
+        updateVerifBtn();
         if (r.ok) {
           toast('✅ ' + r.message, 'success');
           const p = (state.allData || []).find(x => String(x.id) === String(state.verifyId));
@@ -3376,6 +3447,7 @@
             p.verified = true;
             p.fotoTTD = r.fotoTTD || '';
             p.fotoTTDId = r.fotoTTDId || '';
+            p.metodeTTD = r.metodeTTD || metode;
           }
           if (r.version) state.version = r.version;
           state.dashboardCache = null;
@@ -3387,14 +3459,16 @@
         }
       })
       .withFailureHandler(e => {
+        delete btn.dataset.busy;
         btn.disabled = false;
-        btn.innerHTML = ICONS.shield + ' Verifikasi';
+        updateVerifBtn();
         toast('Gagal: ' + e.message, 'error');
       })
       .apiVerifyWithTTD({
         id: state.verifyId,
-        fotoTTDBase64: state.verifyFotoTTDBase64,
-        fotoTTDMime: state.verifyFotoTTDMime
+        fotoTTDBase64: ttdData,
+        fotoTTDMime: ttdMime,
+        metode
       });
   }
 

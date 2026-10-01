@@ -144,7 +144,8 @@ module.exports = async (req, res) => {
       case 'verifyWithTTD': {
         const [nm] = await store.namaById(params.id);
         r = await store.verifyWithTTD(params);
-        if (r.ok) await store.logAksi('VERIFY_TTD', session, siapa(nm, params.id) + ' → status suara PASTI (bukti TTD diupload)');
+        if (r.ok) await store.logAksi('VERIFY_TTD', session, siapa(nm, params.id) + ' → status suara PASTI (' +
+          (r.metodeTTD === 'digital' ? 'tanda tangan digital di aplikasi' : 'bukti fotokopi KTP ber-TTD diupload') + ')');
         break;
       }
       case 'unverify': {
