@@ -2,11 +2,11 @@
  * Service Worker — PWA Data Pendukung
  * Strategi:
  *  - App shell & vendor  : cache-first (precache saat install)
- *  - Navigasi (HTML)     : network-first → fallback cache → offline.html
+ *  - Navigasi (HTML)     : network-first (maks 6 dtk) → fallback cache → offline.html (Mode Offline)
  *  - /api/photo          : cache-first di perangkat (dihapus saat logout)
  *  - /api/* lainnya      : network-only (data selalu fresh)
  * ============================================================ */
-const VERSION = 'pendukung-v22';
+const VERSION = 'pendukung-v23';
 const PHOTO_CACHE = 'pendukung-foto-v1';   // foto KTP/TTD (id file tak pernah berubah) — dihapus saat logout
 const PHOTO_MAX = 400;                      // batas jumlah foto tersimpan di perangkat
 const SHELL = [
@@ -71,8 +71,9 @@ self.addEventListener('fetch', (event) => {
   // Navigasi halaman: network-first
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
+      fetchTimeout(req, 6000)                 // sinyal lemah: jangan menunggu lama, langsung pakai salinan
         .then(res => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
           const copy = res.clone();
           caches.open(VERSION).then(c => c.put('/index.html', copy)).catch(() => {});
           return res;
@@ -105,12 +106,21 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+function fetchTimeout(req, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), ms);
+    fetch(req).then(r => { clearTimeout(t); resolve(r); }, e => { clearTimeout(t); reject(e); });
+  });
+}
+
 async function photoFromCache(req, id) {
   const key = '/__foto/' + encodeURIComponent(id);
   const cache = await caches.open(PHOTO_CACHE);
   const hit = await cache.match(key);
   if (hit) return hit;
-  const res = await fetch(req);
+  let res;
+  try { res = await fetch(req); }
+  catch (e) { return new Response('', { status: 504, statusText: 'Offline' }); }   // offline & belum tersimpan
   if (res && res.ok && (res.headers.get('Content-Type') || '').startsWith('image/')) {
     try {
       await cache.put(key, res.clone());

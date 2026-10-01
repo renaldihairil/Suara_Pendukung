@@ -11,6 +11,7 @@
   const ENDPOINT = '/api/rpc';
 
   async function callApi(fnName, args) {
+    if (window.__offlineMode) throw new Error('📴 Tidak ada internet — fitur ini butuh koneksi');
     const payload = args && args.length === 1 && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])
       ? args[0]
       : (args && args.length ? { args } : {});

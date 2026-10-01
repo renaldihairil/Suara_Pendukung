@@ -77,7 +77,177 @@
   const ROLE_LABEL = { admin: 'Super Admin', operator: 'Operator', user: 'User' };
   function userRole() { const r = state.user && state.user.role; return r === 'admin' || r === 'operator' ? r : 'user'; }
   function isAdmin() { return userRole() === 'admin'; }                 // Super Admin
-  function canOperate() { return userRole() !== 'user'; }               // Super Admin atau Operator
+  function roleOperate() { return userRole() !== 'user'; }              // peran Super Admin / Operator (tanpa melihat koneksi)
+  function canOperate() { return roleOperate() && !state.offline; }     // boleh MENGUBAH data sekarang (Mode Offline = hanya lihat)
+  function adminWrite() { return isAdmin() && !state.offline; }
+
+  // ============================================================ //
+  // MODE OFFLINE: salinan data terakhir disimpan permanen di HP   //
+  // → aplikasi tetap bisa DIBUKA & DILIHAT tanpa internet selama  //
+  //   maks. 3 hari sejak terakhir terhubung. Semua aksi ubah data  //
+  //   dimatikan; begitu internet kembali, otomatis sinkron.        //
+  // ============================================================ //
+  const OFF_KEY = 'pendukung_offline_v1';
+  const OFF_AT_KEY = 'pendukung_online_at';
+  const OFF_MAX_AGE = 3 * 24 * 3600 * 1000;
+  function offRead() { try { return JSON.parse(localStorage.getItem(OFF_KEY) || 'null'); } catch (e) { return null; } }
+  function offOnlineAt() { try { return Number(localStorage.getItem(OFF_AT_KEY)) || 0; } catch (e) { return 0; } }
+  function offTouch(force) {               // server baru saja terhubung (dibatasi 1x/menit agar ringan)
+    const now = Date.now();
+    if (!force && now - (state._offTouchAt || 0) < 60000) return;
+    state._offTouchAt = now;
+    try { localStorage.setItem(OFF_AT_KEY, String(now)); } catch (e) {}
+  }
+  function offSave(part) {
+    if (state.offline || !state.user) return;
+    try {
+      const cur = offRead() || {};
+      const next = Object.assign({}, cur.user && cur.user.username === state.user.username ? cur : {}, part, { user: state.user, savedAt: Date.now() });
+      localStorage.setItem(OFF_KEY, JSON.stringify(next));
+      offTouch(true);
+    } catch (e) { /* penyimpanan penuh → abaikan, mode online tetap jalan */ }
+  }
+  function offClear() { try { localStorage.removeItem(OFF_KEY); localStorage.removeItem(OFF_AT_KEY); } catch (e) {} }
+  /** Salinan yang masih boleh dipakai (≤ 3 hari sejak terakhir online) atau null */
+  function offLoad() {
+    const snap = offRead();
+    if (!snap || !snap.user || !snap.boot) return null;
+    const at = Math.max(offOnlineAt(), snap.savedAt || 0);
+    if (!at || Date.now() - at > OFF_MAX_AGE) { offClear(); return null; }
+    snap.onlineAt = at;
+    return snap;
+  }
+  function fmtOffAt(t) {
+    try {
+      const d = new Date(t);
+      return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: 'Asia/Makassar' }) + ', ' +
+        d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' }).replace('.', ':');
+    } catch (e) { return ''; }
+  }
+  function setOfflineUI(on) {
+    window.__offlineMode = !!on;
+    document.body.classList.toggle('is-offline', !!on);
+    let bar = $('offlineBar');
+    if (on) {
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'offlineBar';
+        bar.className = 'offline-bar';
+        bar.setAttribute('role', 'status');
+        const main = document.querySelector('.app-main');
+        if (main && $('appContent')) main.insertBefore(bar, $('appContent')); else document.body.prepend(bar);
+        const fit = () => { const tb = document.querySelector('.topbar'); if (tb && bar.isConnected) bar.style.top = Math.round(tb.getBoundingClientRect().height) + 'px'; };
+        fit(); window.addEventListener('resize', fit);
+      }
+      bar.innerHTML = '<span class="ob-ico">📴</span><span class="ob-txt"><b>Mode Offline</b> · hanya lihat · data per ' +
+        esc(fmtOffAt(state.offlineAt || offOnlineAt() || Date.now())) + ' WITA</span>' +
+        '<button type="button" class="ob-retry" id="offlineRetry">Coba sambung</button>';
+      const rb = $('offlineRetry');
+      if (rb) rb.onclick = () => { rb.disabled = true; rb.textContent = 'Menyambung…'; tryReconnect(true).finally(() => { const x = $('offlineRetry'); if (x) { x.disabled = false; x.textContent = 'Coba sambung'; } }); };
+    } else if (bar) bar.remove();
+    setSyncStatus(on ? 'offline' : 'online');
+  }
+
+  /** Masuk Mode Offline (saat membuka aplikasi tanpa internet, atau internet putus saat dipakai) */
+  function enterOffline(reason) {
+    if (state.offline) return;
+    state.offline = true;
+    state.offlineAt = offOnlineAt() || state.loadedAt || Date.now();
+    stopPolling();
+    closeWriteModals();
+    setOfflineUI(true);
+    applyRoleUI();
+    if (state.page === 'input' || state.page === 'pengaturan') { state.page = 'dashboard'; state.pageToken++; markNav('dashboard'); }
+    renderCurrentPage();
+    if (reason !== 'boot') toast('📴 Internet terputus — Mode Offline (hanya lihat)', 'warn');
+    startReconnectLoop();
+  }
+
+  function closeWriteModals() {
+    ['modalEdit', 'modalVerify', 'modalUser', 'modalPass', 'modalBulkKtp', 'modalCropFoto', 'modalConfirm', 'modalScan'].forEach(id => {
+      const m = $(id); if (m) m.classList.remove('show');
+    });
+    if (state.sel && state.sel.on) exitSelMode(false);
+  }
+
+  function markNav(p) { document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.getAttribute('data-nav') === p)); }
+
+  function startReconnectLoop() {
+    clearInterval(state.reconnTimer);
+    state.reconnTimer = setInterval(() => {
+      if (!state.offline) { clearInterval(state.reconnTimer); return; }
+      // batas 3 hari terlewati saat aplikasi tetap terbuka → kunci
+      if (Date.now() - (offOnlineAt() || state.offlineAt || 0) > OFF_MAX_AGE) { offClear(); location.reload(); return; }
+      if (!document.hidden && navigator.onLine !== false) tryReconnect(false);
+    }, 10000);
+  }
+
+  /** Cek server; bila tersambung → keluar Mode Offline & sinkron. Sesi tidak berlaku → ke halaman login. */
+  async function tryReconnect(manual) {
+    if (state._reconnBusy) return;
+    state._reconnBusy = true;
+    try {
+      const sesi = await fetchJsonTimeout('/api/auth', 8000);
+      if (sesi && sesi.ok && sesi.user) { goOnline(sesi.user); return; }
+      if (sesi && sesi.ok === false) {                 // server terjangkau tapi sesi habis / akun nonaktif
+        offClear();
+        alert('Sesi login sudah berakhir. Silakan login kembali.');
+        location.reload();
+        return;
+      }
+      if (manual) toast('Masih belum ada internet', 'warn');
+    } catch (e) {
+      if (manual) toast('Masih belum ada internet', 'warn');
+    } finally { state._reconnBusy = false; }
+  }
+
+  function goOnline(user) {
+    const wasBoot = !!state.offlineBoot;
+    state.offline = false;
+    state.offlineBoot = false;
+    clearInterval(state.reconnTimer);
+    state.user = Object.assign({}, state.user, user);
+    try { sessionStorage.setItem('pendukung_user', JSON.stringify(state.user)); } catch (e) {}
+    offTouch(true);
+    setOfflineUI(false);
+    applyRoleUI();
+    state.usersCache = null; state.logsCache = null;       // muat ulang yang terbaru saat dibuka
+    renderCurrentPage();                                   // tombol ubah data muncul kembali
+    toast('✅ Kembali online — data diperbarui', 'success');
+    state.isFetching = true;
+    fetchAndReplace(true, () => { renderCurrentPage(); startPolling(true); if (wasBoot) watchModals(); }, {});
+  }
+
+  async function fetchJsonTimeout(url, ms) {
+    const ctl = new AbortController();
+    const tm = setTimeout(() => ctl.abort(), ms);
+    try {
+      const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
+      if (r.status >= 500) throw new Error('HTTP ' + r.status);
+      return await r.json();
+    } finally { clearTimeout(tm); }
+  }
+
+  /** Buka aplikasi dari salinan di HP (tanpa internet) */
+  function startOffline(snap) {
+    state.offline = true;
+    state.offlineBoot = true;
+    state.offlineAt = snap.onlineAt;
+    state.user = snap.user;
+    $('loginScreen').style.display = 'none';
+    $('mainApp').style.removeProperty('display');
+    if (Array.isArray(snap.users)) state.usersCache = snap.users;
+    if (Array.isArray(snap.logs)) state.logsCache = snap.logs;
+    applyBootstrap(snap.boot);
+    state.page = 'dashboard';
+    state.pageToken++;
+    markNav('dashboard');
+    setOfflineUI(true);
+    applyRoleUI();
+    renderCurrentPage();
+    startReconnectLoop();
+  }
+  window.addEventListener('online', () => { if (state.offline) setTimeout(() => tryReconnect(false), 800); });
 
   function applyRoleUI() {
     const admin = isAdmin();
@@ -86,17 +256,17 @@
     // mengambang kanan bawah (#fabInput) supaya menu bawahnya 3 item sejajar & rapi.
     document.querySelectorAll('[data-nav="input"]').forEach(el => {
       const inBottom = !!el.closest('.bottom-nav');
-      el.style.display = (inBottom ? admin : staff) ? '' : 'none';
+      el.style.display = (inBottom ? admin && !state.offline : staff) ? '' : 'none';
     });
     const fabIn = $('fabInput');
-    if (fabIn) fabIn.classList.toggle('show', staff && !admin);
-    document.querySelectorAll('[data-nav="pengaturan"]').forEach(el => { el.style.display = admin ? '' : 'none'; });
+    if (fabIn) fabIn.classList.toggle('show', staff && !isAdmin());
+    document.querySelectorAll('[data-nav="pengaturan"]').forEach(el => { el.style.display = admin && !state.offline ? '' : 'none'; });
     // Nav admin: Kelola User & Log Aktivitas (+ judul grup-nya)
     document.querySelectorAll('[data-nav="users"], [data-nav="logs"], .admin-only').forEach(el => {
       el.style.display = admin ? '' : 'none';
     });
     const fab = $('fabScan');
-    if (fab) fab.style.display = admin ? '' : 'none';
+    if (fab) { fab.style.display = admin && !state.offline ? '' : 'none'; if (admin && !state.offline) fab.classList.add('show'); }
 
     // Identitas user (sidebar, topbar, avatar)
     const u = state.user || {};
@@ -133,6 +303,8 @@
 
   function startAppAfterLogin() {
     try { sessionStorage.setItem('pendukung_auth', '1'); } catch (e) {}
+    // minta browser menyimpan data aplikasi secara permanen (salinan Mode Offline & foto tidak mudah dihapus)
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
     $('loginScreen').style.display = 'none';
     $('mainApp').style.removeProperty('display');
     const fab = $('fabScan');
@@ -184,7 +356,11 @@
     }
     state._lastDupCheck = Date.now();
     if (isAdmin()) updateFabBadge(r.dupGroups || 0);
+    if (state.offline) return;
     setSyncStatus('online');
+    // salinan permanen untuk Mode Offline (config + dashboard + daftar + log ringkas)
+    offSave({ boot: { ok: true, config: r.config || null, dashboard: r.dashboard || state.dashboardCache, list: r.list || state.allData,
+      version: r.version, rev: r.rev, dupGroups: r.dupGroups || 0, logs: Array.isArray(r.logs) ? r.logs : (state.dashLogs || null), me: r.me || null } });
   }
 
   // Cadangan bila bootstrap gagal (mis. server lama): alur lama per bagian
@@ -564,6 +740,7 @@
 
   $('logoutBtn').addEventListener('click', () => {
     stopPolling();
+    offClear();
     try {
       ['pendukung_auth', 'pendukung_user', 'pendukung_cache_v1', 'pendukung_cache_at', 'pendukung_cache_version', 'pendukung_config'].forEach(k => sessionStorage.removeItem(k));
     } catch (e) {}
@@ -580,23 +757,39 @@
   // BOOT: cek sesi ke server (auto-login & role)                  //
   // ============================================================ //
   (async function bootSession() {
-    let sesi = null;
-    try {
-      const r = await fetch('/api/auth', { credentials: 'same-origin' });
-      sesi = await r.json();
-    } catch (e) { sesi = null; }
+    // tunggu seluruh app.js selesai dieksekusi (konstanta di bawah sudah siap) — penting bila offline (tanpa await jaringan)
+    await new Promise(r => setTimeout(r, 0));
+    let sesi = null, netFail = false;
+    if (navigator.onLine === false) netFail = true;
+    else {
+      try { sesi = await fetchJsonTimeout('/api/auth', 8000); }
+      catch (e) { sesi = null; netFail = true; }        // tidak ada internet / server tak terjangkau / timeout
+    }
     if (sesi && sesi.ok && sesi.user) {
       state.user = sesi.user;
       try { sessionStorage.setItem('pendukung_user', JSON.stringify(sesi.user)); } catch (e) {}
+      offTouch(true);
       startAppAfterLogin();
-    } else {
-      try {
-        ['pendukung_auth', 'pendukung_user'].forEach(k => sessionStorage.removeItem(k));
-      } catch (e) {}
-      $('loginScreen').style.display = 'flex';
-      const lu = $('loginUser');
-      if (lu) lu.focus();
+      return;
     }
+    const hadSnap = !!offRead();
+    if (netFail) {
+      const snap = offLoad();
+      if (snap) { startOffline(snap); return; }        // ✅ tetap bisa dibuka & dilihat tanpa internet
+    } else offClear();                                  // server menyatakan belum/tidak login → hapus salinan
+    try {
+      ['pendukung_auth', 'pendukung_user'].forEach(k => sessionStorage.removeItem(k));
+    } catch (e) {}
+    $('loginScreen').style.display = 'flex';
+    if (netFail) {
+      const le = $('loginErr');
+      if (le) le.textContent = hadSnap
+        ? '📴 Tidak ada internet. Data offline di perangkat ini sudah lebih dari 3 hari — sambungkan internet lalu login.'
+        : '📴 Tidak ada internet. Login sekali saat online agar aplikasi bisa dibuka tanpa internet.';
+      window.addEventListener('online', () => { if (le) le.textContent = ''; }, { once: true });
+    }
+    const lu = $('loginUser');
+    if (lu) lu.focus();
   })();
 
   // ============================================================ //
@@ -608,6 +801,8 @@
   // 2) bila berubah → ambil data terbaru dalam SATU permintaan     //
   // 3) perbarui halaman yang sedang dilihat tanpa refresh          //
   // ============================================================ //
+  window.addEventListener('offline', () => { if (state.user && state.allData && $('mainApp') && $('mainApp').style.display !== 'none') enterOffline('drop'); });
+
   function startPolling(skipFirst) {
     stopPolling();
     if (!skipFirst) syncData(true);
@@ -629,12 +824,20 @@
       .then(r => {
         state.isRevChecking = false;
         if (!r || !r.ok) { if (!silent) setSyncStatus('offline'); return; }
+        state._revFail = 0;
+        offTouch(false);
         setSyncStatus('online');
         if (state.rev && r.rev === state.rev && state.allData) return;       // tidak ada perubahan
         state.isFetching = true;
         fetchAndReplace(true, null, { fromRemote: !!state.rev });
       })
-      .catch(() => { state.isRevChecking = false; if (!silent) setSyncStatus('offline'); });
+      .catch(() => {
+        state.isRevChecking = false;
+        if (!silent) setSyncStatus('offline');
+        // 2x berturut-turut gagal terhubung (±8 dtk) → Mode Offline (hanya lihat) sampai internet kembali
+        state._revFail = (state._revFail || 0) + 1;
+        if (state._revFail >= 2 && state.allData) enterOffline('drop');
+      });
   }
 
   // Ambil data terbaru (satu permintaan) lalu perbarui tampilan yang sedang dibuka
@@ -813,7 +1016,7 @@
   }
 
   function loadDashLogs(force) {
-    if (!isAdmin()) return;
+    if (!isAdmin() || state.offline) return;
     if (!force && state.dashLogs && Date.now() - (state.dashLogsAt || 0) < 30000) return;
     state.dashLogsAt = Date.now();
     google.script.run
@@ -887,7 +1090,7 @@
 
   function hariHBannerHtml(h) {
     if (!h) {
-      if (!isAdmin()) return '';
+      if (!adminWrite()) return '';
       return '<section class="hh-banner hh-empty"><div class="hh-emoji">🗳️</div>' +
         '<div class="hh-body"><div class="hh-kicker">HARI PEMILIHAN</div><div class="hh-title">Tetapkan tanggal Hari H pemilihan</div>' +
         '<div class="hh-msg">Tanggal Hari H akan tampil sebagai hitung mundur di Dashboard untuk seluruh tim.</div></div>' +
@@ -905,7 +1108,7 @@
         '<div class="hh-title">' + esc(hhFmtLong(h.tanggal)) + (h.jam ? ' • ' + esc(h.jam) + ' ' + HH_LABEL : '') + '</div>' +
         (h.lokasi ? '<div class="hh-loc">📍 ' + esc(h.lokasi) + '</div>' : '') +
         '<div class="hh-msg">' + esc(hhMessage(days)) + '</div></div>' +
-      (isAdmin() ? '<button type="button" class="hh-link" id="hhManage">Ubah jadwal ' + ICONS.arrowRight + '</button>' : '') +
+      (adminWrite() ? '<button type="button" class="hh-link" id="hhManage">Ubah jadwal ' + ICONS.arrowRight + '</button>' : '') +
     '</section>';
   }
 
@@ -1256,7 +1459,7 @@
       '</div>' +
 
       '<div class="detail-actions">' +
-        (!canOperate() ? '' :
+        (!roleOperate() ? '' :
         '<button class="btn-download" id="btnDownloadPdf" ' + (filtered.length === 0 ? 'disabled' : '') + ' type="button">' +
           ICONS.download + ' Download PDF (A4)' +
         '</button>') +
@@ -1808,6 +2011,7 @@
   function renderInput() {
     const c = $('appContent');
     if (!c) return;
+    if (state.offline && roleOperate()) { c.innerHTML = emptyState('📴', 'Butuh internet', 'Input data hanya bisa dilakukan saat online.'); return; }
     if (!canOperate()) { c.innerHTML = emptyState('🔒', 'Tidak ada akses', 'Akun Anda hanya bisa melihat data.'); return; }
     state.fotoBase64 = null;
     state.fotoMime = null;
@@ -3844,6 +4048,7 @@
     const c = $('appContent');
     if (!c) return;
     if (!isAdmin()) { c.innerHTML = emptyState('🔒', 'Khusus Super Admin', 'Pengaturan hanya bisa diubah oleh Super Admin.'); return; }
+    if (state.offline) { c.innerHTML = emptyState('📴', 'Butuh internet', 'Pengaturan hanya bisa dibuka saat online.'); return; }
     const token = state.pageToken;
 
     if (state.cfgCache && state.dashboardCache) {
@@ -4438,6 +4643,7 @@
   // ============================================================ //
   // EKSPOR UNTUK pages.js (halaman admin & profil)                //
   // ============================================================ //
-  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, canOperate, userRole, ROLE_LABEL, setPage, reloadData: cb => fetchAndReplace(true, cb), state: state };
+  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, canOperate, userRole, ROLE_LABEL, setPage, offSave, isOffline: () => !!state.offline,
+    offInfo: () => { const sn = offRead(); const at = Math.max(offOnlineAt(), (sn && sn.savedAt) || 0); return sn && sn.boot ? { at, until: at + OFF_MAX_AGE, count: (sn.boot.list || []).length } : null; }, reloadData: cb => fetchAndReplace(true, cb), state: state };
 
 })();
