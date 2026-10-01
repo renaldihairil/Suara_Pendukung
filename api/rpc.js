@@ -177,12 +177,31 @@ module.exports = async (req, res) => {
         break;
       }
 
-      /* ============ WRITE: khusus Super Admin ============ */
       case 'update': {
+        // catat APA yang diubah (data sebelum vs sesudah) agar Super Admin bisa memeriksa hasil edit Operator
+        const lama = ((await store.getList({})).data || []).find(x => String(x.id) === String(params.id));
         r = await store.updatePendukung(params);
-        if (r.ok) await store.logAksi('UPDATE', session, clip(params.nama, 80) + ' / NIK ' + clip(params.nik, 20) + ' (ID ' + clip(params.id, 40) + ')');
+        if (r.ok) {
+          const ch = [];
+          if (lama) {
+            const domain = require('../lib/domain');
+            const cmp = [['nama', 'nama'], ['nik', 'NIK'], ['kampung', 'kampung'], ['rt', 'RT']];
+            cmp.forEach(([k, lbl]) => {
+              if (params[k] == null) return;
+              const baru = k === 'rt' ? domain.normRT(params[k]) : String(params[k]).trim();
+              const old = k === 'rt' ? domain.normRT(lama[k]) : String(lama[k] || '').trim();
+              if (baru !== old) ch.push(lbl + ' ' + clip(old, 40) + ' → ' + clip(baru, 40));
+            });
+          }
+          if (params.fotoBase64) ch.push('foto KTP diganti');
+          if (params.fotoTTDBase64) ch.push('bukti TTD diganti');
+          await store.logAksi('UPDATE', session, clip(params.nama || (lama && lama.nama), 80) + ' / NIK ' + clip(params.nik || (lama && lama.nik), 20) +
+            (ch.length ? ' — ' + ch.join(', ') : ' — tanpa perubahan isi'));
+        }
         break;
       }
+
+      /* ============ WRITE: khusus Super Admin ============ */
       case 'delete': {
         const [nm] = await store.namaById(params.id);
         r = await store.deletePendukung(params.id);

@@ -126,7 +126,8 @@ Lalu: **Simpan** → jalankan **`pgwAuthorize`** (dialog izin kini memuat keempa
   | Input data (kamera KTP, baca otomatis) | ✓ | ✓ | – |
   | Ubah status suara (PASTI/BELUM) & status cetak (satuan/massal) | ✓ | ✓ | – |
   | Download KTP (satuan/massal) & PDF per kampung | ✓ | ✓ | – |
-  | Edit & hapus data | ✓ | – | – |
+  | Edit data | ✓ | ✓ | – |
+  | Hapus data | ✓ | – | – |
   | Pengaturan, Hari H, Kelola User, Log Aktivitas | ✓ | – | – |
 
   Semua izin dicek di **server** (`lib/roles.js`), bukan hanya disembunyikan di tampilan. Peran dibaca ulang dari sheet Users di setiap aksi, jadi perubahan peran/nonaktif berlaku ±10 dtk kemudian tanpa login ulang. Minimal 1 Super Admin aktif selalu dijaga.

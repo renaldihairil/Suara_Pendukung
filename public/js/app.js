@@ -2822,10 +2822,10 @@
         '<button class="ra ra-verify' + (isVerified ? ' on' : '') + '" data-action="' + (isVerified ? 'unverify' : 'verify') + '" data-id="' + id + '" title="' + (isVerified ? 'Batalkan verifikasi' : 'Verifikasi (tandai sudah TTD)') + '" type="button">' + (isVerified ? ICONS.clock : ICONS.shield) + '</button>' +
         '<button class="ra ra-print' + (isPrinted ? ' on' : '') + '" data-action="toggle-print" data-id="' + id + '" title="' + (isPrinted ? 'Tandai belum dicetak' : 'Tandai sudah dicetak') + '" type="button">' + ICONS.printer + '</button>' +
         '<button class="ra ra-ktp" data-action="download-ktp" data-id="' + id + '" type="button"' + (hasFotoKTP ? ' title="Unduh KTP (A4)"' : ' disabled title="Belum ada foto KTP"') + '>' + ICONS.download + '</button>' +
-        (isAdmin() ?
         '<button class="ra ra-edit" data-action="edit" data-id="' + id + '" title="Edit data" type="button">' + ICONS.edit + '</button>' +
+        (isAdmin() ?
         '<button class="ra ra-del" data-action="del" data-id="' + id + '" data-nama="' + esc(p.nama) + '" title="Hapus data" type="button">' + ICONS.trash + '</button>'
-        : '<button class="ra ra-view" data-action="detail" data-id="' + id + '" title="Lihat detail" type="button">' + ICONS.eye + '</button>')
+        : '')
         :
         '<button class="ra ra-view" data-action="detail" data-id="' + id + '" title="Lihat detail" type="button">' + ICONS.eye + '</button>';
 
@@ -2960,7 +2960,7 @@
         const id = btn.getAttribute('data-id');
         if (action === 'detail') { window.__openDetailWarga(id); return; }
         if (!canOperate()) return; // role user: tombol tulis tidak ada & ditolak server
-        if (action === 'edit') { if (isAdmin()) window.__editData(id); }
+        if (action === 'edit') window.__editData(id);
         else if (action === 'del') { if (isAdmin()) window.__deleteData(id, btn.getAttribute('data-nama')); }
         else if (action === 'verify') window.__startVerify(id);
         else if (action === 'unverify') window.__unverifyData(id);
@@ -3216,7 +3216,7 @@
           ? '<button class="btn btn-outline wa-main" id="btnDetailUnverify" type="button">' + ICONS.clock + ' Batal Verifikasi</button>'
           : '<button class="btn btn-primary wa-main" id="btnDetailVerify" type="button">' + ICONS.shield + ' Verifikasi Sekarang</button>'
         ) +
-        (isAdmin() ? '<button class="btn wa-btn wa-edit" id="btnDetailEdit" type="button">' + ICONS.edit + ' Edit Data</button>' : '') +
+        '<button class="btn wa-btn wa-edit" id="btnDetailEdit" type="button">' + ICONS.edit + ' Edit Data</button>' +
         '<button class="btn wa-btn wa-print" id="btnDetailPrint" type="button">' + ICONS.printer + (isPrinted ? ' Tandai Belum Cetak' : ' Tandai Sudah Cetak') + '</button>' +
         '<button class="btn wa-btn wa-ktp" id="btnDetailKtp" type="button"' + (p.fotoKTPId ? '' : ' disabled') + '>' + ICONS.download + ' Unduh KTP</button>' +
         (isAdmin() ? '<button class="btn wa-btn wa-del" id="btnDetailDel" type="button">' + ICONS.trash + ' Hapus Data</button>' : '') +
@@ -3548,7 +3548,7 @@
   };
 
   window.__editData = function(id) {
-    if (!isAdmin()) { toast('Edit data khusus Super Admin', 'warn'); return; }
+    if (!canOperate()) { toast(state.offline ? '📴 Edit data butuh internet' : 'Akun Anda hanya bisa melihat data', 'warn'); return; }
     const p = (state.allData || []).find(x => String(x.id) === String(id));
     if (!p) { toast('Data tidak ditemukan', 'error'); return; }
     openEditModal(p);

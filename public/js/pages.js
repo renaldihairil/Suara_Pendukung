@@ -19,7 +19,7 @@
   const ROLE_ICO = { admin: '👑', operator: '🛠️', user: '👁️' };
   const ROLE_DESC = {
     admin: 'Mengelola sepenuhnya: input, edit & hapus data, status suara & cetak, download, Pengaturan, Kelola User, dan Log Aktivitas.',
-    operator: 'Input data (kamera KTP & baca otomatis), ubah status suara (PASTI/BELUM) & status cetak, download KTP & PDF per kampung. Tidak bisa edit/hapus data, Pengaturan, maupun Kelola User. Semua aksinya tercatat di Log atas namanya.',
+    operator: 'Input & edit data (kamera KTP & baca otomatis), ubah status suara (PASTI/BELUM) & status cetak, download KTP & PDF per kampung. Tidak bisa hapus data, Pengaturan, maupun Kelola User. Semua aksinya tercatat di Log atas namanya.',
     user: 'Hanya melihat dashboard & data (termasuk foto KTP). Tidak bisa mengubah apa pun.'
   };
   const roleOf = r => (r === 'admin' || r === 'operator' ? r : 'user');
