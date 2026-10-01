@@ -215,7 +215,7 @@
     renderCurrentPage();                                   // tombol ubah data muncul kembali
     toast('✅ Kembali online — data diperbarui', 'success');
     state.isFetching = true;
-    fetchAndReplace(true, () => { renderCurrentPage(); startPolling(true); if (wasBoot) watchModals(); }, {});
+    fetchAndReplace(true, () => { renderCurrentPage(); startPolling(true); if (wasBoot) watchModals(); if (window.Notif) window.Notif.onAppReady(); }, {});
   }
 
   async function fetchJsonTimeout(url, ms) {
@@ -351,6 +351,7 @@
         renderCurrentPage();
         startPolling(true);          // data baru saja dimuat → cek perubahan berikutnya sesuai interval
         watchModals();
+        if (window.Notif) window.Notif.onAppReady();
       })
       .withFailureHandler(() => legacyStart())
       .apiGetBootstrap();
@@ -370,6 +371,9 @@
       STATS_VERIFIED_PER_KAMPUNG = r.dashboard.kampungVerified || {};
     }
     if (Array.isArray(r.list)) {
+      // notifikasi dalam aplikasi: bandingkan dengan data sebelumnya (tanpa permintaan tambahan ke server)
+      if (!state.offline && state._notifBase && window.Notif) { try { window.Notif.onData(state._notifBase, r.list); } catch (e) {} }
+      state._notifBase = r.list;
       state.allData = r.list;
       state.loadedAt = Date.now();
       state.version = r.version || '0|empty';
@@ -774,7 +778,9 @@
       if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'clear-photos' });
       if (window.caches) caches.delete('pendukung-foto-v1');
     } catch (e) {}
-    fetch('/api/auth', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'logout' }) })
+    // perangkat ini berhenti menerima push untuk akun yang keluar, lalu logout
+    Promise.race([Promise.resolve(window.Notif && window.Notif.onLogout()), new Promise(r => setTimeout(r, 2500))])
+      .then(() => fetch('/api/auth', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'logout' }) }))
       .catch(() => {})
       .then(() => location.reload());
   });
@@ -883,7 +889,7 @@
         refreshOpenDetail();
         if (silent && changed) {
           showPullIndicator();
-          if (opts && opts.fromRemote && Date.now() > (state.quietSyncUntil || 0)) toast('🔄 Data diperbarui', 'info');
+          if (opts && opts.fromRemote && Date.now() > (state.quietSyncUntil || 0) && Date.now() - (window.__notifToastAt || 0) > 2000) toast('🔄 Data diperbarui', 'info');
         }
         if (typeof callback === 'function') callback(true);
       })
@@ -4805,7 +4811,7 @@
   // ============================================================ //
   // EKSPOR UNTUK pages.js (halaman admin & profil)                //
   // ============================================================ //
-  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, canOperate, userRole, ROLE_LABEL, setPage, offSave, isOffline: () => !!state.offline,
+  window.__app = { $, esc, toast, ICONS, emptyState, fmtNum, isAdmin, canOperate, userRole, ROLE_LABEL, setPage, offSave, isOffline: () => !!state.offline, syncNow: () => syncData(true),
     offInfo: () => { const sn = offRead(); const at = Math.max(offOnlineAt(), (sn && sn.savedAt) || 0); return sn && sn.boot ? { at, until: at + OFF_MAX_AGE, count: (sn.boot.list || []).length } : null; }, reloadData: cb => fetchAndReplace(true, cb), state: state };
 
 })();

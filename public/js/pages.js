@@ -63,6 +63,7 @@
               '<div class="cfg-kk-name">' + esc(u.nama || u.username) +  ' <span class="person-verify-tag ' + roleCls + '" style="margin-left:6px">' + roleLbl + '</span>' +
                 (JAB_LABEL[u.jabatan] ? ' <span class="person-verify-tag jab-tag jab-' + u.jabatan + '">' + JAB_LABEL[u.jabatan] + '</span>' : '') + '</div>' +
               '<div class="cfg-kk-sub">@' + esc(u.username) + ' • Login terakhir: ' + esc(u.lastLogin ? String(u.lastLogin).replace('T', ' ').slice(0, 16) : 'belum pernah') + '</div>' +
+              '<div class="cfg-kk-sub ' + (u.notifPerangkat ? 'nt-on' : 'nt-off') + '">' + (u.notifPerangkat ? '🔔 Notifikasi aktif (' + u.notifPerangkat + ' perangkat)' : '🔕 Notifikasi belum aktif') + '</div>' +
             '</div>' +
             '<div class="cfg-kk-actions needs-net">' +
               '<button class="cfg-kk-btn edit" data-uact="edit" data-id="' + esc(u.id) + '" title="Edit user" type="button">' + (ICONS.edit || '') + '</button>' +
@@ -87,6 +88,7 @@
           '<div class="cfg-hero-stat"><div class="lbl">Operator</div><div class="val">' + users.filter(u => roleOf(u.role) === 'operator').length + '</div></div>' +
           '<div class="cfg-hero-stat"><div class="lbl">User</div><div class="val">' + users.filter(u => roleOf(u.role) === 'user').length + '</div></div>' +
           '<div class="cfg-hero-stat"><div class="lbl">Aktif</div><div class="val">' + users.filter(u => u.aktif !== false && u.aktif !== 'false').length + '</div></div>' +
+          '<div class="cfg-hero-stat"><div class="lbl">🔔 Notif aktif</div><div class="val">' + users.filter(u => u.notifPerangkat > 0).length + ' / ' + users.length + '</div></div>' +
         '</div>' +
       '</div>' +
       '<div class="cfg-section">' +
