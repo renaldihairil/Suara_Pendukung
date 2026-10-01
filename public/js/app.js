@@ -274,8 +274,6 @@
     document.querySelectorAll('.js-user-name').forEach(el => { el.textContent = nama; });
     document.querySelectorAll('.js-user-role').forEach(el => { el.textContent = ROLE_LABEL[userRole()]; });
     document.querySelectorAll('.js-user-initials').forEach(el => { el.textContent = initialsOf(nama); });
-    if (window.FotoAman) window.FotoAman.setViewer(nama + (u.username ? ' @' + u.username : ''));
-    setWatermarkLayer(nama + (u.username ? ' @' + u.username : ''));
     document.body.classList.toggle('role-admin', admin);
     document.body.classList.toggle('role-operator', userRole() === 'operator');
     document.body.classList.toggle('role-user', !staff);
@@ -293,17 +291,6 @@
     if (locked) { state.page = 'dashboard'; state.pageToken++; document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.getAttribute('data-nav') === 'dashboard')); }
     toast('🔑 Hak akses Anda diubah menjadi ' + ROLE_LABEL[userRole()], 'info');
     return true;
-  }
-
-  /* Tanda air samar di halaman Data (nama & username yang login): bila layar difoto/di-screenshot,
-     sumber kebocoran tetap terlacak. Tidak menghalangi klik (pointer-events: none). */
-  function setWatermarkLayer(who) {
-    let el = $('wmLayer');
-    if (!el) { el = document.createElement('div'); el.id = 'wmLayer'; el.setAttribute('aria-hidden', 'true'); document.body.appendChild(el); }
-    const t = ('RAHASIA • ' + who).replace(/[<>&"]/g, '');
-    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="340" height="190"><text x="10" y="120" transform="rotate(-22 170 95)" ' +
-      'font-family="Arial,sans-serif" font-size="15" font-weight="700" fill="#0f172a" fill-opacity="0.07">' + t + '</text></svg>';
-    el.style.backgroundImage = 'url("data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '")';
   }
 
   /* ---- Perlindungan layar (sebatas yang bisa dilakukan aplikasi web) ----
@@ -654,7 +641,6 @@
   }
 
   function renderCurrentPage() {
-    document.body.classList.toggle('wm-page', state.page === 'data' || state.page === 'detail-kampung');
     document.body.classList.toggle('page-input', state.page === 'input');
     if (state.page === 'dashboard') renderDashboard();
     else if (state.page === 'input') renderInput();
@@ -3230,7 +3216,7 @@
     $('modalDetailWarga').classList.add('show');
   };
 
-  // Foto KTP/TTD di detail digambar ke canvas + watermark (tidak bisa "Download gambar" lewat tekan lama)
+  // Foto KTP/TTD di detail digambar ke canvas (tidak bisa "Download gambar" lewat tekan lama)
   function fotoAmanHtml(url, alt) {
     if (window.FotoAman) return window.FotoAman.html(url, alt);
     return '<div class="foto-wrap"><img class="warga-foto" src="' + esc(url) + '" alt="' + esc(alt) + '"></div>';
