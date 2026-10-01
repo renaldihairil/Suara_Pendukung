@@ -274,6 +274,8 @@
     document.querySelectorAll('.js-user-name').forEach(el => { el.textContent = nama; });
     document.querySelectorAll('.js-user-role').forEach(el => { el.textContent = ROLE_LABEL[userRole()]; });
     document.querySelectorAll('.js-user-initials').forEach(el => { el.textContent = initialsOf(nama); });
+    if (window.FotoAman) window.FotoAman.setViewer(nama + (u.username ? ' @' + u.username : ''));
+    setWatermarkLayer(nama + (u.username ? ' @' + u.username : ''));
     document.body.classList.toggle('role-admin', admin);
     document.body.classList.toggle('role-operator', userRole() === 'operator');
     document.body.classList.toggle('role-user', !staff);
@@ -292,6 +294,43 @@
     toast('🔑 Hak akses Anda diubah menjadi ' + ROLE_LABEL[userRole()], 'info');
     return true;
   }
+
+  /* Tanda air samar di halaman Data (nama & username yang login): bila layar difoto/di-screenshot,
+     sumber kebocoran tetap terlacak. Tidak menghalangi klik (pointer-events: none). */
+  function setWatermarkLayer(who) {
+    let el = $('wmLayer');
+    if (!el) { el = document.createElement('div'); el.id = 'wmLayer'; el.setAttribute('aria-hidden', 'true'); document.body.appendChild(el); }
+    const t = ('RAHASIA • ' + who).replace(/[<>&"]/g, '');
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="340" height="190"><text x="10" y="120" transform="rotate(-22 170 95)" ' +
+      'font-family="Arial,sans-serif" font-size="15" font-weight="700" fill="#0f172a" fill-opacity="0.07">' + t + '</text></svg>';
+    el.style.backgroundImage = 'url("data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '")';
+  }
+
+  /* ---- Perlindungan layar (sebatas yang bisa dilakukan aplikasi web) ----
+     1) Aplikasi ke latar belakang / pindah aplikasi → isi layar ditutup (pratinjau "Aplikasi terbaru" tidak menampilkan data)
+     2) Tombol PrintScreen (Windows) → isi clipboard ditimpa sehingga tangkapan layar tidak tersimpan
+     3) Cetak halaman dari browser (Ctrl+P) → hanya tampil pemberitahuan (lihat CSS @media print) */
+  (function screenGuard() {
+    let shield = null;
+    const show = on => {
+      if (!shield) {
+        shield = document.createElement('div');
+        shield.id = 'privacyShield';
+        shield.innerHTML = '<div><img src="/icons/logo-64.png" alt="" width="54" height="54"><b>Suara Pendukung</b><span>Data dilindungi</span></div>';
+        document.body.appendChild(shield);
+      }
+      shield.classList.toggle('on', !!on);
+    };
+    document.addEventListener('visibilitychange', () => show(document.hidden));
+    window.addEventListener('pagehide', () => show(true));
+    window.addEventListener('pageshow', () => show(false));
+    window.addEventListener('focus', () => show(false));
+    document.addEventListener('keyup', e => {
+      if (e.key !== 'PrintScreen') return;
+      try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText('Tangkapan layar Suara Pendukung tidak diizinkan').catch(() => {}); } catch (x) {}
+      toast('🔒 Tangkapan layar tidak diizinkan untuk data ini', 'warn');
+    });
+  })();
 
   // Catat download (dibuat di perangkat) ke Log Aktivitas — tidak menghambat download
   function logDownload(jenis, keterangan) {
@@ -615,6 +654,7 @@
   }
 
   function renderCurrentPage() {
+    document.body.classList.toggle('wm-page', state.page === 'data' || state.page === 'detail-kampung');
     document.body.classList.toggle('page-input', state.page === 'input');
     if (state.page === 'dashboard') renderDashboard();
     else if (state.page === 'input') renderInput();
@@ -3190,6 +3230,12 @@
     $('modalDetailWarga').classList.add('show');
   };
 
+  // Foto KTP/TTD di detail digambar ke canvas + watermark (tidak bisa "Download gambar" lewat tekan lama)
+  function fotoAmanHtml(url, alt) {
+    if (window.FotoAman) return window.FotoAman.html(url, alt);
+    return '<div class="foto-wrap"><img class="warga-foto" src="' + esc(url) + '" alt="' + esc(alt) + '"></div>';
+  }
+
   function renderModalDetailWarga(p) {
     const content = $('modalDetailWargaContent');
     if (!content) return;
@@ -3232,7 +3278,7 @@
       '<div class="warga-section">' +
         '<div class="warga-section-title">' + ICONS.card + ' Foto KTP</div>' +
         (fotoKTP
-          ? '<div class="foto-wrap is-loading"><span class="foto-spin"></span><img class="warga-foto" fetchpriority="high" decoding="async" src="' + esc(fotoKTP) + '" alt="Foto KTP ' + esc(p.nama) + '" onload="this.parentNode.classList.remove(\'is-loading\')" onerror="this.parentNode.classList.remove(\'is-loading\');this.parentNode.classList.add(\'is-err\')" onclick="window.__showFoto(\'' + esc(fotoKTP) + '\')"></div>'
+          ? fotoAmanHtml(fotoKTP, 'Foto KTP ' + p.nama)
           : '<div class="warga-foto-empty">📷 Belum ada foto KTP</div>'
         ) +
       '</div>' +
@@ -3240,7 +3286,7 @@
       '<div class="warga-section">' +
         '<div class="warga-section-title">' + ICONS.ttd + (p.metodeTTD === 'digital' ? ' Bukti Tanda Tangan Digital' : ' Bukti Fotokopi KTP yang Ditandatangani') + '</div>' +
         (fotoTTD
-          ? '<div class="foto-wrap is-loading"><span class="foto-spin"></span><img class="warga-foto" decoding="async" src="' + esc(fotoTTD) + '" alt="Bukti TTD ' + esc(p.nama) + '" onload="this.parentNode.classList.remove(\'is-loading\')" onerror="this.parentNode.classList.remove(\'is-loading\');this.parentNode.classList.add(\'is-err\')" onclick="window.__showFoto(\'' + esc(fotoTTD) + '\')"></div>' +
+          ? fotoAmanHtml(fotoTTD, 'Bukti TTD ' + p.nama) +
             '<div class="warga-ttd-note">✅ ' + (p.metodeTTD === 'digital' ? 'Diverifikasi dengan tanda tangan digital' : 'Sudah diverifikasi dengan bukti fotokopi KTP ber-TTD') + '</div>'
           : '<div class="warga-foto-empty">' +
               (isVerified
@@ -3261,6 +3307,9 @@
         '<button class="btn wa-btn wa-ktp" id="btnDetailKtp" type="button"' + (p.fotoKTPId ? '' : ' disabled') + '>' + ICONS.download + ' Unduh KTP</button>' +
         (isAdmin() ? '<button class="btn wa-btn wa-del" id="btnDetailDel" type="button">' + ICONS.trash + ' Hapus Data</button>' : '') +
       '</div>');
+
+    if (window.FotoAman) window.FotoAman.hydrate(content);
+    content.querySelectorAll('[data-pf]').forEach(w => w.addEventListener('click', () => window.__showFoto(w.getAttribute('data-pf'))));
 
     const btnClose = $('btnCloseDetailWarga');
     if (btnClose) btnClose.addEventListener('click', () => {
@@ -3663,8 +3712,15 @@
     if (m && String(url).indexOf('drive.google') !== -1) {
       url = '/api/photo?id=' + encodeURIComponent(m[1]);
     }
-    $('modalFotoImg').src = url;
+    const cv = $('modalFotoCv'), box = $('modalFotoBox');
+    if (box) { box.classList.add('is-loading'); box.classList.remove('is-err'); }
+    if (cv) { cv.width = 1; cv.height = 1; }
     $('modalFoto').classList.add('show');
+    if (window.FotoAman && cv) {
+      window.FotoAman.draw(cv, url)
+        .then(() => box && box.classList.remove('is-loading'))
+        .catch(() => { if (box) { box.classList.remove('is-loading'); box.classList.add('is-err'); } });
+    }
   };
 
   window.__editData = function(id) {
