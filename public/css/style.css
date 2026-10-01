@@ -1674,9 +1674,6 @@ img,canvas,.foto-wrap,.modal-foto{-webkit-touch-callout:none;-webkit-user-select
 .pf-view.is-loading .pf-cv{opacity:0}
 .pf-view.is-err::after{content:'Foto tidak dapat dimuat';display:block;text-align:center;color:#fff;padding:60px 0}
 .foto-wrap .foto-spin{pointer-events:none}
-/* tanda air samar di halaman Data */
-#wmLayer{position:fixed;inset:0;z-index:45;pointer-events:none;background-repeat:repeat;display:none}
-body.wm-page #wmLayer{display:block}
 /* penutup layar saat aplikasi di latar belakang */
 #privacyShield{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;background:#0f2447;color:#fff;text-align:center}
 #privacyShield.on{display:flex}
