@@ -83,7 +83,7 @@ module.exports = async (req, res) => {
     });
   }
   const isSuper = session.role === 'admin';
-  const me = { username: session.username, nama: session.nama, role: session.role };
+  const me = { username: session.username, nama: session.nama, role: session.role, jabatan: session.jabatan || '', panggilan: session.panggilan || '' };
 
   try {
     let r;
@@ -212,7 +212,7 @@ module.exports = async (req, res) => {
           ok: true,
           data: users.map(u => ({
             id: u.id, username: u.username, nama: u.nama,
-            role: u.role, aktif: u.aktif, createdAt: u.createdAt, lastLogin: u.lastLogin
+            role: u.role, aktif: u.aktif, createdAt: u.createdAt, lastLogin: u.lastLogin, jabatan: u.jabatan, panggilan: u.panggilan
           }))
         };
         break;
@@ -231,13 +231,16 @@ module.exports = async (req, res) => {
       }
       case 'updateUser': {
         const before = (await auth.listUsers(true)).find(u => u.id === String(params.id));
-        r = await auth.updateUser(params.id, { nama: params.nama, role: params.role, aktif: params.aktif });
+        r = await auth.updateUser(params.id, { nama: params.nama, role: params.role, aktif: params.aktif, jabatan: params.jabatan, panggilan: params.panggilan });
         if (r.ok) {
           const ch = [];
           if (before) {
             if (params.nama != null && String(params.nama).trim() !== before.nama) ch.push('nama → ' + clip(params.nama, 60));
             if (params.role != null && roles.normRole(params.role) !== before.role) ch.push('peran ' + roles.ROLE_LABEL[before.role] + ' → ' + roles.ROLE_LABEL[roles.normRole(params.role)]);
             if (params.aktif != null && !!params.aktif !== before.aktif) ch.push(params.aktif ? 'diaktifkan' : 'dinonaktifkan');
+            const JAB = { '': 'Umum', timses: 'Tim Sukses', cakades: 'Calon Kades' };
+            if (params.jabatan != null && auth.normJabatan(params.jabatan) !== before.jabatan) ch.push('jabatan ' + JAB[before.jabatan] + ' → ' + JAB[auth.normJabatan(params.jabatan)]);
+            if (params.panggilan != null && auth.normPanggilan(params.panggilan) !== before.panggilan) ch.push('panggilan → ' + (auth.normPanggilan(params.panggilan) || 'tanpa'));
           }
           await store.logAksi('USER_UPDATE', session, (before ? before.nama + ' (@' + before.username + ')' : String(params.id)) + (ch.length ? ': ' + ch.join(', ') : ''));
         }
