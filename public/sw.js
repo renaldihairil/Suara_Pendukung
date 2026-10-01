@@ -6,7 +6,7 @@
  *  - /api/photo          : cache-first di perangkat (dihapus saat logout)
  *  - /api/* lainnya      : network-only (data selalu fresh)
  * ============================================================ */
-const VERSION = 'pendukung-v28';
+const VERSION = 'pendukung-v29';
 const PHOTO_CACHE = 'pendukung-foto-v1';   // foto KTP/TTD (id file tak pernah berubah) — dihapus saat logout
 const PHOTO_MAX = 400;                      // batas jumlah foto tersimpan di perangkat
 const SHELL = [
@@ -64,7 +64,7 @@ self.addEventListener('fetch', (event) => {
 
   // Foto: cache-first di perangkat (kunci = id file saja, tanda tangan URL berganti mingguan)
   if (url.pathname === '/api/photo' && url.searchParams.get('id') && url.searchParams.get('download') !== '1') {
-    event.respondWith(photoFromCache(req, url.searchParams.get('id')));
+    event.respondWith(photoFromCache(req, url.searchParams.get('id') + (url.searchParams.get('b') === '1' ? ':b' : '')));
     return;
   }
 

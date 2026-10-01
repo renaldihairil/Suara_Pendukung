@@ -15,6 +15,31 @@ const roles = require('../lib/roles');
 const DOWNLOAD_JENIS = { KTP: 'DOWNLOAD_KTP', KTP_MASSAL: 'DOWNLOAD_KTP_MASSAL', PDF_KAMPUNG: 'DOWNLOAD_PDF' };
 const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n || 200);
 const siapa = (nama, id) => (nama ? nama : 'ID ' + id);
+const photourl = require('../lib/photourl');
+
+/** NIK tersamar untuk akun peran User: 5203••••••••0005 */
+function maskNik(v) {
+  const s = String(v == null ? '' : v);
+  return s.length >= 10 ? s.slice(0, 4) + '•'.repeat(s.length - 8) + s.slice(-4) : (s ? '•'.repeat(s.length) : s);
+}
+/**
+ * Respons untuk peran User: semua NIK disamarkan & URL foto diganti versi kabur
+ * (di SERVER, sehingga NIK lengkap / foto tajam tidak pernah sampai ke perangkat User).
+ */
+function redactForUser(v) {
+  if (Array.isArray(v)) return v.map(redactForUser);
+  if (!v || typeof v !== 'object') return v;
+  const o = {};
+  for (const k of Object.keys(v)) {
+    const x = v[k];
+    if (k === 'nik' || k === 'NIK') o[k] = maskNik(x);
+    else if (k === 'fotoKTP') o[k] = v.fotoKTPId ? photourl.photoUrl(v.fotoKTPId, { blur: true }) : '';
+    else if (k === 'fotoTTD') o[k] = v.fotoTTDId ? photourl.photoUrl(v.fotoTTDId, { blur: true }) : '';
+    else if (x && typeof x === 'object') o[k] = redactForUser(x);
+    else o[k] = x;
+  }
+  return o;
+}
 
 function json(res, status, obj) {
   res.statusCode = status;
@@ -281,6 +306,7 @@ module.exports = async (req, res) => {
       default:
         return json(res, 400, { ok: false, message: 'Action tidak dikenal' });
     }
+    if (session.role === 'user' && r && typeof r === 'object') r = redactForUser(r);
     return json(res, 200, r);
   } catch (err) {
     const msg0 = String(err && err.message ? err.message : '');
