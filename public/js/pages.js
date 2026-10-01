@@ -33,11 +33,15 @@
     if (!c) return;
     if (!A.isAdmin || !A.isAdmin()) { c.innerHTML = A.emptyState ? A.emptyState('🔒', 'Khusus Admin', '') : 'Khusus admin'; return; }
 
+    if (!state.usersCache && A.isOffline && A.isOffline()) {
+      c.innerHTML = A.emptyState('📴', 'Butuh internet', 'Daftar user belum tersimpan di perangkat ini. Buka halaman ini sekali saat online.');
+      return;
+    }
     if (!state.usersCache) {
       c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat user...</p></div>';
       return google.script.run
         .withSuccessHandler(r => {
-          if (r.ok) { state.usersCache = r.data; renderUsers(); }
+          if (r.ok) { state.usersCache = r.data; if (A.offSave) A.offSave({ users: r.data }); renderUsers(); }
           else c.innerHTML = (A.emptyState ? A.emptyState('⚠️', 'Gagal memuat', r.message) : esc(r.message));
         })
         .withFailureHandler(e => { c.innerHTML = A.emptyState ? A.emptyState('⚠️', 'Gagal memuat', e.message) : esc(e.message); })
@@ -60,7 +64,7 @@
                 (JAB_LABEL[u.jabatan] ? ' <span class="person-verify-tag jab-tag jab-' + u.jabatan + '">' + JAB_LABEL[u.jabatan] + '</span>' : '') + '</div>' +
               '<div class="cfg-kk-sub">@' + esc(u.username) + ' • Login terakhir: ' + esc(u.lastLogin ? String(u.lastLogin).replace('T', ' ').slice(0, 16) : 'belum pernah') + '</div>' +
             '</div>' +
-            '<div class="cfg-kk-actions">' +
+            '<div class="cfg-kk-actions needs-net">' +
               '<button class="cfg-kk-btn edit" data-uact="edit" data-id="' + esc(u.id) + '" title="Edit user" type="button">' + (ICONS.edit || '') + '</button>' +
               '<button class="cfg-kk-btn del" data-uact="reset" data-id="' + esc(u.id) + '" title="Reset password" type="button">🔑</button>' +
               '<button class="cfg-kk-btn del" data-uact="toggle" data-id="' + esc(u.id) + '" title="' + (aktif ? 'Nonaktifkan' : 'Aktifkan') + '" type="button">' + (aktif ? (ICONS.close || '⏸') : (ICONS.check || '▶')) + '</button>' +
@@ -89,7 +93,7 @@
         '<div class="cfg-section-head">' +
           '<div class="cfg-section-ico">' + (ICONS.users || '') + '</div>' +
           '<div><div class="cfg-section-title">Daftar User</div><div class="cfg-section-sub">' + users.length + ' akun terdaftar</div></div>' +
-          '<button class="cfg-kk-btn edit" id="btnUserAdd" title="Tambah user" type="button" style="width:auto;padding:0 12px;height:36px;border-radius:10px">' + (ICONS.plus || '+') + ' Tambah</button>' +
+          '<button class="cfg-kk-btn edit needs-net" id="btnUserAdd" title="Tambah user" type="button" style="width:auto;padding:0 12px;height:36px;border-radius:10px">' + (ICONS.plus || '+') + ' Tambah</button>' +
         '</div>' +
         '<div>' + rows + '</div>' +
         '<div class="role-guide">' + ['admin', 'operator', 'user'].map(r =>
@@ -216,11 +220,15 @@
     if (!c) return;
     if (!A.isAdmin || !A.isAdmin()) { c.innerHTML = A.emptyState ? A.emptyState('🔒', 'Khusus Admin', '') : 'Khusus admin'; return; }
 
+    if (!state.logsCache && A.isOffline && A.isOffline()) {
+      c.innerHTML = A.emptyState('📴', 'Butuh internet', 'Log belum tersimpan di perangkat ini. Buka halaman ini sekali saat online.');
+      return;
+    }
     if (!state.logsCache) {
       c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat log...</p></div>';
       return google.script.run
         .withSuccessHandler(r => {
-          if (r.ok) { state.logsCache = r.data; renderLogs(); }
+          if (r.ok) { state.logsCache = r.data; if (A.offSave) A.offSave({ logs: r.data.slice(0, 300) }); renderLogs(); }
           else c.innerHTML = A.emptyState ? A.emptyState('⚠️', 'Gagal memuat', r.message) : esc(r.message);
         })
         .withFailureHandler(e => { c.innerHTML = A.emptyState ? A.emptyState('⚠️', 'Gagal memuat', e.message) : esc(e.message); })
@@ -263,7 +271,7 @@
       '<div class="cfg-section"><div class="cfg-section-head">' +
         '<div class="cfg-section-ico">📋</div>' +
         '<div><div class="cfg-section-title">Riwayat</div><div class="cfg-section-sub">300 terbaru</div></div>' +
-        '<button class="cfg-kk-btn edit" id="btnLogRefresh" type="button" style="width:auto;padding:0 12px;height:36px;border-radius:10px" title="Refresh">↻</button>' +
+        '<button class="cfg-kk-btn edit needs-net" id="btnLogRefresh" type="button" style="width:auto;padding:0 12px;height:36px;border-radius:10px" title="Refresh">↻</button>' +
       '</div>' + rows + '</div>';
 
     $('btnLogRefresh').addEventListener('click', () => { state.logsCache = null; renderLogs(); });
@@ -272,6 +280,21 @@
   /* ============================================================ */
   /* PROFIL & GANTI PASSWORD (semua role)                          */
   /* ============================================================ */
+  function offlineSection() {
+    const inf = A.offInfo ? A.offInfo() : null;
+    const f = t => new Date(t).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' }).replace(/\./g, ':');
+    return '<div class="cfg-section">' +
+      '<div class="cfg-section-head">' +
+        '<div class="cfg-section-ico">📴</div>' +
+        '<div><div class="cfg-section-title">Mode Offline</div><div class="cfg-section-sub">Buka aplikasi tanpa internet (hanya lihat)</div></div>' +
+      '</div>' +
+      '<div class="cfg-info">' + (ICONS.info || '') + '<div>' + (inf
+        ? 'Tersimpan di perangkat ini: <b>' + fmtNum(inf.count) + ' data</b> (per ' + esc(f(inf.at)) + ' WITA). Bisa dibuka tanpa internet sampai <b>' + esc(f(inf.until)) + ' WITA</b> — masa ini diperpanjang otomatis setiap kali online.'
+        : 'Belum ada salinan data di perangkat ini. Salinan dibuat otomatis saat aplikasi dibuka dengan internet.') +
+        ' Saat offline, semua aksi ubah data dinonaktifkan. Foto KTP yang tampil hanya yang pernah dibuka saat online. Logout menghapus salinan ini.</div></div>' +
+    '</div>';
+  }
+
   window.renderProfil = function () {
     const c = $('appContent');
     if (!c) return;
@@ -282,10 +305,11 @@
         '<div class="cfg-hero-content">' +
           '<div class="cfg-hero-label">👤 AKUN SAYA</div>' +
           '<div class="cfg-hero-title">' + esc(u ? (u.nama || u.username) : '-') + '</div>' +
-          '<div class="cfg-hero-cand">@' + esc(u ? u.username : '') + ' • Role: <b>' + (admin ? 'Admin' : 'User') + '</b></div>' +
+          '<div class="cfg-hero-cand">@' + esc(u ? u.username : '') + ' • Hak akses: <b>' + esc(ROLE_LABEL[roleOf(u && u.role)]) + '</b>' +
+            (u && JAB_LABEL[u.jabatan] ? ' • ' + JAB_LABEL[u.jabatan] : '') + '</div>' +
         '</div>' +
         '<div class="cfg-hero-stats">' +
-          '<div class="cfg-hero-stat"><div class="lbl">Akses</div><div class="val" style="font-size:16px">' + (admin ? 'Penuh' : 'Lihat') + '</div></div>' +
+          '<div class="cfg-hero-stat"><div class="lbl">Akses</div><div class="val" style="font-size:16px">' + ({ admin: 'Penuh', operator: 'Input & Status', user: 'Lihat' })[roleOf(u && u.role)] + '</div></div>' +
         '</div>' +
       '</div>' +
       (admin ?
@@ -304,9 +328,10 @@
           '<div class="cfg-section-ico">🔑</div>' +
           '<div><div class="cfg-section-title">Keamanan</div><div class="cfg-section-sub">Ganti password akun ini</div></div>' +
         '</div>' +
-        '<button class="cfg-add-btn" id="btnGantiPw" type="button">' + (ICONS.save || '') + ' Ganti Password</button>' +
+        '<button class="cfg-add-btn needs-net" id="btnGantiPw" type="button">' + (ICONS.save || '') + ' Ganti Password</button>' +
         '<div class="cfg-info">' + (ICONS.info || '') + '<div>Setelah password diganti, sesi tetap aktif di perangkat ini. Perangkat lain yang belum login tidak terpengaruh.</div></div>' +
       '</div>' +
+      offlineSection() +
       '<div class="cfg-section">' +
         '<div class="cfg-section-head">' +
           '<div class="cfg-section-ico">📲</div>' +
