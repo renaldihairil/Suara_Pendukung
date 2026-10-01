@@ -16,6 +16,7 @@ const DOWNLOAD_JENIS = { KTP: 'DOWNLOAD_KTP', KTP_MASSAL: 'DOWNLOAD_KTP_MASSAL',
 const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n || 200);
 const siapa = (nama, id) => (nama ? nama : 'ID ' + id);
 const photourl = require('../lib/photourl');
+const push = require('../lib/push');
 
 /** NIK tersamar untuk akun peran User: 5203••••••••0005 */
 function maskNik(v) {
@@ -110,6 +111,8 @@ module.exports = async (req, res) => {
   const isSuper = session.role === 'admin';
   const me = { username: session.username, nama: session.nama, role: session.role, jabatan: session.jabatan || '', panggilan: session.panggilan || '' };
 
+  let pushJob = null;                         // notifikasi push dikirim di belakang layar setelah aksi berhasil
+  const actorPush = Object.assign({}, session, { peran: roles.ROLE_LABEL[session.role] || '' });
   try {
     let r;
     switch (action) {
@@ -162,13 +165,19 @@ module.exports = async (req, res) => {
 
       /* ============ WRITE: Operator & Super Admin (sudah di-guard roles.can) ============ */
       case 'add': {
-        r = await store.addPendukung(params);
+        r = await store.addPendukung(params, session);
+        if (r.ok) pushJob = push.notify({ type: 'baru', id: r.id, nama: clip(params.nama, 80), kampung: clip(params.kampung, 60),
+          rt: require('../lib/domain').normRT(params.rt) }, actorPush).catch(e => console.warn('[push]', e.message));
         if (r.ok) await store.logAksi('ADD', session, clip(params.nama, 80) + ' / NIK ' + clip(params.nik, 20) + ' / ' + clip(params.kampung, 60) + ' RT ' + require('../lib/domain').normRT(params.rt));
         break;
       }
       case 'verifyWithTTD': {
         const [nm] = await store.namaById(params.id);
-        r = await store.verifyWithTTD(params);
+        r = await store.verifyWithTTD(params, session);
+        if (r.ok) {
+          const pv = ((await store.getList({})).data || []).find(x => String(x.id) === String(params.id)) || {};
+          pushJob = push.notify({ type: 'pasti', id: params.id, nama: pv.nama || nm, kampung: pv.kampung || '', rt: pv.rt || '' }, actorPush).catch(e => console.warn('[push]', e.message));
+        }
         if (r.ok) await store.logAksi('VERIFY_TTD', session, siapa(nm, params.id) + ' → status suara PASTI (' +
           (r.metodeTTD === 'digital' ? 'tanda tangan digital di aplikasi' : 'bukti fotokopi KTP ber-TTD diupload') + ')');
         break;
@@ -252,12 +261,13 @@ module.exports = async (req, res) => {
 
       /* ============ MANAJEMEN USER (Super Admin) ============ */
       case 'getUsers': {
-        const users = await auth.listUsers();
+        const [users, pushCount] = await Promise.all([auth.listUsers(), push.countByUser()]);
         r = {
           ok: true,
           data: users.map(u => ({
             id: u.id, username: u.username, nama: u.nama,
-            role: u.role, aktif: u.aktif, createdAt: u.createdAt, lastLogin: u.lastLogin, jabatan: u.jabatan, panggilan: u.panggilan
+            role: u.role, aktif: u.aktif, createdAt: u.createdAt, lastLogin: u.lastLogin, jabatan: u.jabatan, panggilan: u.panggilan,
+            notifPerangkat: pushCount[u.username.toLowerCase()] || 0
           }))
         };
         break;
@@ -292,6 +302,12 @@ module.exports = async (req, res) => {
         break;
       }
 
+      /* ============ NOTIFIKASI PUSH (semua peran) ============ */
+      case 'pushKey':         r = { ok: true, publicKey: await push.publicKey(), tenang: push.isQuiet() }; break;
+      case 'pushSubscribe':   r = await push.subscribe(session, params.subscription, params.perangkat); break;
+      case 'pushUnsubscribe': r = await push.unsubscribe(params.endpoint); break;
+      case 'pushStatus':      r = await push.status(session, params.endpoint); break;
+
       /* ============ SEMUA ROLE ============ */
       case 'changeOwnPassword': {
         r = await auth.changeOwnPassword(session, params.oldPassword, params.newPassword);
@@ -307,6 +323,7 @@ module.exports = async (req, res) => {
         return json(res, 400, { ok: false, message: 'Action tidak dikenal' });
     }
     if (session.role === 'user' && r && typeof r === 'object') r = redactForUser(r);
+    if (pushJob) await push.later(pushJob);
     return json(res, 200, r);
   } catch (err) {
     const msg0 = String(err && err.message ? err.message : '');

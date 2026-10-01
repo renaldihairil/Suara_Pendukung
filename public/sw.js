@@ -6,7 +6,7 @@
  *  - /api/photo          : cache-first di perangkat (dihapus saat logout)
  *  - /api/* lainnya      : network-only (data selalu fresh)
  * ============================================================ */
-const VERSION = 'pendukung-v30';
+const VERSION = 'pendukung-v31';
 const PHOTO_CACHE = 'pendukung-foto-v1';   // foto KTP/TTD (id file tak pernah berubah) — dihapus saat logout
 const PHOTO_MAX = 400;                      // batas jumlah foto tersimpan di perangkat
 const SHELL = [
@@ -22,6 +22,7 @@ const SHELL = [
   '/js/fotoaman.js',
   '/js/app.js',
   '/js/pages.js',
+  '/js/notif.js',
   '/js/pwa.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
@@ -137,4 +138,64 @@ async function photoFromCache(req, id) {
 // Logout: hapus foto tersimpan (privasi di perangkat bersama)
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'clear-photos') event.waitUntil(caches.delete(PHOTO_CACHE));
+});
+
+/* ============================================================
+ * NOTIFIKASI PUSH — "Data baru" & "Suara PASTI"
+ *  - Aplikasi sedang terbuka & terlihat → tidak tampil di panel HP;
+ *    aplikasi diberi tahu agar langsung sinkron (notifikasi dalam aplikasi).
+ *  - Banyak kejadian dalam 2 menit → DIGABUNG jadi satu notifikasi
+ *    ("5 data baru oleh Sari, Budi"); hanya yang pertama berbunyi.
+ *  - Diketuk → aplikasi dibuka langsung ke detail data.
+ * ============================================================ */
+const GROUP_MS = 2 * 60 * 1000;
+let pushChain = Promise.resolve();          // push yang datang bersamaan diproses berurutan agar penggabungan akurat
+
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { nama: event.data ? event.data.text() : '' }; }
+  event.waitUntil(pushChain = pushChain.catch(() => {}).then(async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const aktif = wins.find(c => c.visibilityState === 'visible' && c.focused);
+    if (aktif) { aktif.postMessage({ type: 'push', data: d }); return; }
+
+    const type = d.type === 'pasti' ? 'pasti' : 'baru';
+    const tag = 'sp-' + type;
+    const lama = (await self.registration.getNotifications({ tag }))[0];
+    const ld = lama && lama.data;
+    const gabung = ld && ld.start && (Date.now() - ld.start) < GROUP_MS;
+    const count = gabung ? (ld.count || 1) + 1 : 1;
+    const olehList = gabung ? Array.from(new Set((ld.olehList || []).concat(d.oleh || []))).slice(0, 3) : (d.oleh ? [d.oleh] : []);
+    const label = type === 'pasti' ? 'suara PASTI' : 'data baru';
+    const title = count > 1
+      ? (type === 'pasti' ? '✅ ' : '🆕 ') + count + ' ' + label + (olehList.length ? ' oleh ' + olehList.join(', ') : '')
+      : (type === 'pasti' ? '✅ Suara PASTI' : '🆕 Data pendukung baru');
+    const body = (count > 1 ? 'Terakhir: ' : '') + (d.nama || '') + (d.lokasi ? ' • ' + d.lokasi : '') +
+      (count === 1 && d.oleh ? '\nOleh ' + d.oleh + (d.peran ? ' (' + d.peran + ')' : '') : '');
+    await self.registration.showNotification(title, {
+      body,
+      tag,
+      renotify: !gabung,                 // hanya notifikasi pertama dalam satu kelompok yang berbunyi
+      icon: '/icons/icon-192.png',
+      badge: '/icons/favicon-32.png',
+      data: { id: d.id, count, olehList, start: gabung ? ld.start : Date.now(), multi: count > 1 }
+    });
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const d = event.notification.data || {};
+  const url = d.id && !d.multi ? '/?open=' + encodeURIComponent(d.id) : '/';
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const w = wins.find(c => new URL(c.url).origin === self.location.origin);
+    if (w) {
+      await w.focus();
+      if (d.id && !d.multi) w.postMessage({ type: 'open-detail', id: d.id });
+      else w.postMessage({ type: 'push' });
+      return;
+    }
+    await self.clients.openWindow(url);
+  })());
 });

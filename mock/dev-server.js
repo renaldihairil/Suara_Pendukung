@@ -22,6 +22,7 @@ process.env.SPREADSHEET_ID = 'MOCK';
 process.env.JWT_SECRET = 'dev-secret-untuk-qa-lokal-0123456789abcdef';
 process.env.ADMIN_USERNAME = 'admin';
 process.env.ADMIN_PASSWORD = 'admin123';
+process.env.PUSH_MOCK = process.env.PUSH_MOCK || '1';   // notifikasi push dicatat di memori (lihat /__push)
 
 /* ---------- Data mock in-memory (baris 0 = header) ---------- */
 const mockSheets = {
@@ -153,6 +154,8 @@ function serveStatic(res, urlPath) {
       });
     }
     res.setHeader('Content-Type', MIME[path.extname(full)] || 'application/octet-stream');
+    // tes lama (bukan tes notifikasi): MOCK_NO_NOTIF_PROMPT=1 → popup ajakan notifikasi tidak ditampilkan
+    if (process.env.MOCK_NO_NOTIF_PROMPT === '1' && /index\.html$/.test(full)) data = Buffer.from(String(data).replace('</head>', '<script>window.__suppressNotifPrompt=1</script></head>'));
     res.end(data);
   });
 }
@@ -210,6 +213,7 @@ const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
   try {
     if (u.pathname === '/__gcalls') { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({ n: global.__gcalls, gets: global.__gwgets || 0 })); }
+    if (u.pathname === '/__push') { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify(global.__pushSent || [])); }
     if (u.pathname === '/api/rpc') return await require('../api/rpc')(req, res);
     if (u.pathname === '/api/rev') return await require('../api/rev')(req, res);
     if (u.pathname === '/api/auth') return await require('../api/auth')(req, res);
