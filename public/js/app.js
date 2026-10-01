@@ -1088,27 +1088,47 @@
     return pick(['Masih ' + days + ' hari. Waktu yang cukup untuk membangun kepercayaan warga — mulai dari hal kecil, konsisten tiap hari.', 'Semangat, Tim Pendukung! Mari kerja cerdas dan ikhlas. ☀️']);
   }
 
-  function hariHBannerHtml(h) {
+  /* Kartu hitung mundur Hari H. slot: 'top' (desktop, di atas kartu statistik) | 'mid' (HP, di atas grafik per kampung) */
+  function hariHBannerHtml(h, slot) {
+    const where = slot === 'mid' ? ' hh-slot-mid' : ' hh-slot-top';
     if (!h) {
       if (!adminWrite()) return '';
-      return '<section class="hh-banner hh-empty"><div class="hh-emoji">🗳️</div>' +
+      return '<section class="hh-banner hh-empty' + where + '"><div class="hh-emoji">🗳️</div>' +
         '<div class="hh-body"><div class="hh-kicker">HARI PEMILIHAN</div><div class="hh-title">Tetapkan tanggal Hari H pemilihan</div>' +
         '<div class="hh-msg">Tanggal Hari H akan tampil sebagai hitung mundur di Dashboard untuk seluruh tim.</div></div>' +
-        '<button type="button" class="hh-btn" id="hhSet">Atur sekarang</button></section>';
+        '<button type="button" class="hh-btn js-hh-manage">Atur sekarang</button></section>';
     }
     const days = Math.round(hhDayNum(h.tanggal) - hhDayNum(hhToday()));
     let big, unit;
     if (days < 0) { big = '✔'; unit = 'Selesai'; }
-    else if (days === 0) { big = 'H'; unit = 'HARI INI!'; }
-    else if (days === 1) { big = '1'; unit = 'hari lagi — besok!'; }
-    else { big = String(days); unit = 'hari lagi'; }
-    return '<section class="hh-banner' + (days <= 0 ? ' hh-today' : days <= 7 ? ' hh-soon' : '') + '">' +
-      '<div class="hh-count"><div class="hh-num">' + esc(big) + '</div><div class="hh-unit">' + esc(unit) + '</div></div>' +
-      '<div class="hh-body"><div class="hh-kicker">🗳️ ' + esc(String(h.judul || 'HARI PEMILIHAN').toUpperCase()) + '</div>' +
-        '<div class="hh-title">' + esc(hhFmtLong(h.tanggal)) + (h.jam ? ' • ' + esc(h.jam) + ' ' + HH_LABEL : '') + '</div>' +
-        (h.lokasi ? '<div class="hh-loc">📍 ' + esc(h.lokasi) + '</div>' : '') +
-        '<div class="hh-msg">' + esc(hhMessage(days)) + '</div></div>' +
-      (adminWrite() ? '<button type="button" class="hh-link" id="hhManage">Ubah jadwal ' + ICONS.arrowRight + '</button>' : '') +
+    else if (days === 0) { big = 'H'; unit = 'Hari ini'; }
+    else if (days === 1) { big = '1'; unit = 'Hari lagi'; }
+    else { big = String(days); unit = 'Hari lagi'; }
+    // rincian ringkas: "± 16 minggu 6 hari" / "Besok" / "Hari ini"
+    let rinci = '';
+    if (days >= 14) { const w = Math.floor(days / 7), r = days % 7; rinci = '± ' + w + ' minggu' + (r ? ' ' + r + ' hari' : ''); }
+    else if (days > 1) rinci = days + ' hari lagi';
+    else if (days === 1) rinci = 'Besok!';
+    else if (days === 0) rinci = 'Hari ini!';
+    else rinci = 'Pemilihan telah berlangsung';
+    const info = [];
+    if (h.jam) info.push('<span class="hh-chip">⏰ ' + esc(h.jam) + ' ' + HH_LABEL + '</span>');
+    if (h.lokasi) info.push('<span class="hh-chip">📍 ' + esc(h.lokasi) + '</span>');
+    info.push('<span class="hh-chip hh-chip-soft">' + esc(rinci) + '</span>');
+    return '<section class="hh-banner' + where + (days <= 0 ? ' hh-today' : days <= 7 ? ' hh-soon' : '') + '">' +
+      '<div class="hh-head">' +
+        '<div class="hh-kicker">🗳️ ' + esc(String(h.judul || 'Hari Pemilihan').toUpperCase()) + '</div>' +
+        (adminWrite() ? '<button type="button" class="hh-link js-hh-manage" aria-label="Ubah jadwal">Ubah ' + ICONS.arrowRight + '</button>' : '') +
+      '</div>' +
+      '<div class="hh-main">' +
+        '<div class="hh-count"><div class="hh-num">' + esc(big) + '</div><div class="hh-unit">' + esc(unit) + '</div></div>' +
+        '<div class="hh-when">' +
+          '<div class="hh-label">Hari H pemilihan</div>' +
+          '<div class="hh-title">' + esc(hhFmtLong(h.tanggal)) + '</div>' +
+          '<div class="hh-chips">' + info.join('') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="hh-msg">' + esc(hhMessage(days)) + '</div>' +
     '</section>';
   }
 
@@ -1228,7 +1248,7 @@
       pageHead(esc(greet.judul) + ' <span class="wave">' + greet.emoji + '</span>',
         '<span class="greet-msg js-greet" title="Ketuk untuk kalimat lain">' + esc(greet.pesan) + '</span>', dateCard) +
       warnHtml +
-      hariHBannerHtml(d.hariH) +
+      hariHBannerHtml(d.hariH, 'top') +
       // 7 kartu dalam satu grid: Total melebar 2 kolom (desktop: Total+Laki-laki+Perempuan | 4 kartu status; HP: Total 1 baris, sisanya 2 per baris)
       '<div class="stat-grid">' +
         totalCard +
@@ -1239,6 +1259,7 @@
         statCard('printed-card', 'indigo', ICONS.printer, 'Sudah Dicetak', fmtNum(totalDicetak), pctDicetak + '% sudah print out') +
         statCard('unprinted-card', 'amber', ICONS.printer, 'Belum Dicetak', fmtNum(totalBelumCetak), pctBelumCetak + '% belum print out') +
       '</div>' +
+      hariHBannerHtml(d.hariH, 'mid') +            // HP: hitung mundur tepat di atas grafik per kampung
 
       '<div class="dash-cols' + (isAdmin() ? '' : ' single') + '">' +
         '<section class="card chart-card">' +
@@ -1274,8 +1295,7 @@
     const allLogs = $('btnAllLogs');
     if (allLogs) allLogs.addEventListener('click', () => setPage('logs'));
     loadDashLogs(false);
-    const hhSet = $('hhSet'); if (hhSet) hhSet.addEventListener('click', () => setPage('pengaturan'));
-    const hhMan = $('hhManage'); if (hhMan) hhMan.addEventListener('click', () => setPage('pengaturan'));
+    c.querySelectorAll('.js-hh-manage').forEach(b => b.addEventListener('click', () => setPage('pengaturan')));
   }
 
   // ============================================================ //
