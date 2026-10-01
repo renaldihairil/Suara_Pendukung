@@ -59,7 +59,7 @@ async function handler(req, res) {
         res.setHeader('Set-Cookie', auth.clearSessionCookie());
         return json(res, 200, { ok: false, reason: 'deactivated' });
       }
-      return json(res, 200, { ok: true, user: { username: u.username, nama: u.nama, role: u.role } });
+      return json(res, 200, { ok: true, user: { username: u.username, nama: u.nama, role: u.role, jabatan: u.jabatan, panggilan: u.panggilan } });
     } catch (e) {
       // Sheet tidak terbaca → jangan anggap logout total; tetap izinkan dari JWT
       return json(res, 200, { ok: true, user: { username: session.username, nama: session.nama, role: session.role } });
@@ -114,7 +114,7 @@ async function handler(req, res) {
     res.setHeader('Set-Cookie', auth.sessionCookie(auth.signSession(result.user)));
     return json(res, 200, {
       ok: true,
-      user: { username: result.user.username, nama: result.user.nama, role: result.user.role }
+      user: { username: result.user.username, nama: result.user.nama, role: result.user.role, jabatan: result.user.jabatan, panggilan: result.user.panggilan }
     });
   } catch (err) {
     return json(res, 500, { ok: false, message: 'Error: ' + (err && err.message ? err.message : 'unknown') });

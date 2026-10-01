@@ -706,6 +706,7 @@
   function renderDashboard() {
     const c = $('appContent');
     if (!c) return;
+    state.greet = null;          // membuka Dashboard → pilih kalimat sapaan baru
     if (state.dashboardCache) {
       renderDashboardData();
       if (Date.now() - (state.dashboardAt || 0) < 30000) return;   // baru dimuat → tak perlu minta ulang
@@ -908,6 +909,46 @@
     '</section>';
   }
 
+  /* Sapaan dashboard: sesuai waktu (WITA) & jabatan user; kalimat tetap selama halaman dibuka
+     (sinkron realtime tidak membuatnya berganti), berganti saat Dashboard dibuka lagi / periode waktu berubah / diketuk */
+  function greetStats(d) {
+    const total = d.total || 0, target = d.target || 0;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: HH_ZONE });
+    const baru = (state.allData || []).filter(x => {
+      const t = Date.parse(x.timestamp || x.createdAt || '');
+      return t && new Date(t).toLocaleDateString('en-CA', { timeZone: HH_ZONE }) === today;
+    }).length;
+    let hari = 0;
+    if (d.hariH && d.hariH.tanggal) { const n = Math.round(hhDayNum(d.hariH.tanggal) - hhDayNum(hhToday())); if (n > 0) hari = n; }
+    return { total, target, persen: target > 0 ? Math.round(total / target * 100) : 0, pasti: d.verified || 0, baru, hari };
+  }
+
+  function greetingFor(d, rotate) {
+    const u = state.user || {};
+    const S = window.Sapaan;
+    if (!S) return { judul: 'Selamat Datang, ' + (u.nama || u.username || ''), emoji: '👋', pesan: 'Kelola data pendukung dengan mudah dan cepat.' };
+    const per = S.periodeOf(S.hourIn(HH_ZONE));
+    const key = [u.username, u.nama, u.jabatan, u.panggilan, per].join('|');
+    if (!rotate && state.greet && state.greet.key === key) return state.greet.g;
+    let last = '';
+    try { last = localStorage.getItem('pendukung_greet_last') || ''; } catch (e) {}
+    const g = S.build({ nama: u.nama || u.username, jabatan: u.jabatan, panggilan: u.panggilan, zone: HH_ZONE,
+      stats: greetStats(d || state.dashboardCache || {}), avoid: rotate && state.greet ? state.greet.g.pesan : last });
+    state.greet = { key, g };
+    try { localStorage.setItem('pendukung_greet_last', g.pesan); } catch (e) {}
+    return g;
+  }
+
+  // ketuk kalimat sapaan → ganti kalimat (delegasi; elemen dibuat ulang tiap render)
+  document.addEventListener('click', e => {
+    const el = e.target.closest && e.target.closest('.js-greet');
+    if (!el) return;
+    const g = greetingFor(state.dashboardCache, true);
+    el.classList.remove('greet-in'); void el.offsetWidth;
+    el.textContent = g.pesan;
+    el.classList.add('greet-in');
+  });
+
   function renderDashboardData() {
     const c = $('appContent');
     const d = state.dashboardCache;
@@ -962,7 +1003,7 @@
     const now = new Date();
     const tgl = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: zn.iana });
     const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: zn.iana }).replace('.', ':');
-    const nama = state.user ? (state.user.nama || state.user.username) : '';
+    const greet = greetingFor(d);
 
     const dateCard =
       '<div class="date-chip">' +
@@ -981,7 +1022,8 @@
       '</div>';
 
     c.innerHTML =
-      pageHead('Selamat Datang, ' + esc(nama) + ' <span class="wave">👋</span>', 'Kelola data pendukung dengan mudah dan cepat.', dateCard) +
+      pageHead(esc(greet.judul) + ' <span class="wave">' + greet.emoji + '</span>',
+        '<span class="greet-msg js-greet" title="Ketuk untuk kalimat lain">' + esc(greet.pesan) + '</span>', dateCard) +
       warnHtml +
       hariHBannerHtml(d.hariH) +
       // 7 kartu dalam satu grid: Total melebar 2 kolom (desktop: Total+Laki-laki+Perempuan | 4 kartu status; HP: Total 1 baris, sisanya 2 per baris)

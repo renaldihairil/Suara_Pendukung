@@ -23,6 +23,7 @@
     user: 'Hanya melihat dashboard & data (termasuk foto KTP). Tidak bisa mengubah apa pun.'
   };
   const roleOf = r => (r === 'admin' || r === 'operator' ? r : 'user');
+  const JAB_LABEL = { timses: '🤝 TIM SUKSES', cakades: '🎖️ CALON KADES' };
 
   /* ============================================================ */
   /* KELOLA USER (admin)                                           */
@@ -55,7 +56,8 @@
           '<div class="cfg-kk-head">' +
             '<div class="cfg-kk-avatar">' + esc((u.nama || u.username || '?').slice(0, 2).toUpperCase()) + '</div>' +
             '<div class="cfg-kk-info">' +
-              '<div class="cfg-kk-name">' + esc(u.nama || u.username) +  ' <span class="person-verify-tag ' + roleCls + '" style="margin-left:6px">' + roleLbl + '</span></div>' +
+              '<div class="cfg-kk-name">' + esc(u.nama || u.username) +  ' <span class="person-verify-tag ' + roleCls + '" style="margin-left:6px">' + roleLbl + '</span>' +
+                (JAB_LABEL[u.jabatan] ? ' <span class="person-verify-tag jab-tag jab-' + u.jabatan + '">' + JAB_LABEL[u.jabatan] + '</span>' : '') + '</div>' +
               '<div class="cfg-kk-sub">@' + esc(u.username) + ' • Login terakhir: ' + esc(u.lastLogin ? String(u.lastLogin).replace('T', ' ').slice(0, 16) : 'belum pernah') + '</div>' +
             '</div>' +
             '<div class="cfg-kk-actions">' +
@@ -121,6 +123,27 @@
     const hint = () => { const r = roleOf($('muRole').value); $('muRoleHint').innerHTML = '<b>' + ROLE_ICO[r] + ' ' + esc(ROLE_LABEL[r]) + ':</b> ' + esc(ROLE_DESC[r]); };
     $('muRole').onchange = hint;
     hint();
+    $('muJabatan').value = isEdit ? (u.jabatan || '') : '';
+    $('muPanggilan').value = isEdit ? (u.panggilan || '') : '';
+    // contoh sapaan langsung (berubah saat nama/jabatan/panggilan diganti)
+    const preview = () => {
+      const box = $('muGreetPreview');
+      if (!box || !window.Sapaan) return;
+      const g = window.Sapaan.build({ nama: $('muNama').value.trim() || $('muUsername').value.trim() || 'Nama',
+        jabatan: $('muJabatan').value, panggilan: $('muPanggilan').value,
+        stats: { total: 0, target: 0, persen: 0, pasti: 0, baru: 0, hari: 0 } });
+      box.innerHTML = '<div class="gp-lbl">Contoh sapaan di Dashboard</div>' +
+        '<div class="gp-title">' + esc(g.judul) + ' ' + g.emoji + '</div><div class="gp-msg">' + esc(g.pesan) + '</div>';
+    };
+    $('muJabatan').onchange = () => {
+      // Calon Kades biasanya dipanggil hormat → isi otomatis "Bapak" bila panggilan masih kosong
+      if ($('muJabatan').value === 'cakades' && !$('muPanggilan').value) $('muPanggilan').value = 'Bapak';
+      preview();
+    };
+    $('muPanggilan').onchange = preview;
+    $('muNama').oninput = preview;
+    $('muUsername').oninput = preview;
+    preview();
     $('muPass').value = '';
     $('muPassGroup').style.display = isEdit ? 'none' : '';
     $('modalUser').classList.add('show');
@@ -129,21 +152,29 @@
       const nama = $('muNama').value.trim();
       const role = $('muRole').value;
       const pass = $('muPass').value;
+      const jabatan = $('muJabatan').value;
+      const panggilan = $('muPanggilan').value;
       const btn = $('muSave');
       btn.disabled = true;
       const selesai = r => {
         btn.disabled = false;
         $('modalUser').classList.remove('show');
         state.usersCache = null;
-        if (r && r.ok) { toast('✅ User tersimpan', 'success'); renderUsers(); }
+        if (r && r.ok) {
+          toast('✅ User tersimpan', 'success');
+          if (isEdit && A.state && A.state.user && A.state.user.username === u.username) {
+            Object.assign(A.state.user, { nama, jabatan, panggilan }); A.state.greet = null;
+          }
+          renderUsers();
+        }
         else toast('❌ ' + ((r && r.message) || 'Gagal'), 'error');
       };
       if (isEdit) {
         google.script.run.withSuccessHandler(selesai).withFailureHandler(e => selesai({ ok: false, message: e.message }))
-          .apiUpdateUser({ id: u.id, nama, role });
+          .apiUpdateUser({ id: u.id, nama, role, jabatan, panggilan });
       } else {
         google.script.run.withSuccessHandler(selesai).withFailureHandler(e => selesai({ ok: false, message: e.message }))
-          .apiSaveUsers({ user: { username: $('muUsername').value.trim(), nama, role, password: pass } });
+          .apiSaveUsers({ user: { username: $('muUsername').value.trim(), nama, role, password: pass, jabatan, panggilan } });
       }
     };
     $('muCancel').onclick = () => $('modalUser').classList.remove('show');

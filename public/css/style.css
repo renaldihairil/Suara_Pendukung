@@ -1594,3 +1594,16 @@ input.auto-fill{background:#f0fdf4 !important;border-color:#86efac !important}
 .fab-input:active{transform:scale(.94)}
 body.sel-mode .fab-input,body.notif-open .fab-input,body.page-input .fab-input,body.kcam-open .fab-input{display:none!important}
 @media(min-width:900px){.fab-input,.fab-input.show{display:none!important}}
+
+/* ===== Sapaan dashboard (waktu & jabatan) ===== */
+.greet-msg{cursor:pointer;display:inline-block;-webkit-tap-highlight-color:transparent}
+.greet-msg.greet-in{animation:greetIn .35s ease}
+@keyframes greetIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.lbl-note{font-weight:500;color:var(--muted);font-size:11px}
+.jab-tag.jab-timses{background:#e0f2fe;color:#075985}
+.jab-tag.jab-cakades{background:#fce7f3;color:#9d174d}
+.greet-preview{margin:4px 0 8px;padding:10px 12px;border-radius:10px;background:linear-gradient(135deg,#eff6ff,#f0fdf4);border:1px solid var(--border)}
+.greet-preview .gp-lbl{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.greet-preview .gp-title{font-size:15px;font-weight:800;color:var(--text);margin-top:2px}
+.greet-preview .gp-msg{font-size:12.5px;color:var(--text);opacity:.85;line-height:1.5;margin-top:2px}
+#modalUser .role-hint,#modalUser .greet-preview,#modalUser .form-label{text-align:left}
