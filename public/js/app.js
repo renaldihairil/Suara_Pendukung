@@ -2482,10 +2482,12 @@
     const btn = $('btnSubmit');
     btn.disabled = true;
     btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Memverifikasi NIK...';
+    const ks = kotakSuara({ tone: 'abu', title: 'Menyimpan data pendukung', step: 'Memeriksa NIK' });
 
     google.script.run
       .withSuccessHandler(checkR => {
         if (checkR.ok && !checkR.tersedia) {
+          ks.close();
           btn.disabled = false;
           btn.innerHTML = ICONS.save + ' Simpan Data';
           showDupWarning(checkR.duplikat);
@@ -2499,12 +2501,17 @@
         }
         btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Menyimpan...';
         const payload = { nama, nik, kampung, rt, fotoBase64: state.fotoBase64, fotoMime: state.fotoMime };
+        ks.step(state.fotoBase64 ? 'Mengunggah foto KTP' : 'Menyimpan ke data');
+        const stepT = state.fotoBase64 ? setTimeout(() => ks.step('Menyimpan ke data'), 2500) : null;
         google.script.run
           .withSuccessHandler(r => {
+            clearTimeout(stepT);
             btn.disabled = false;
             btn.innerHTML = ICONS.save + ' Simpan Data';
             if (r.ok) {
-              if (r.fotoGagal) toast('⚠️ ' + r.message, 'warn'); else toast('✅ ' + r.message, 'success');
+              // kertas masuk kotak (±1 dtk), lalu pindah ke halaman Data
+              const anim = ks.success({ title: 'Pendukung baru tercatat', sub: nama + ' • ' + kampung + ' ' + rtLabel(rt) });
+              if (r.fotoGagal) toast('⚠️ ' + r.message, 'warn');
               if (r.version) state.version = r.version;
               $('fNama').value = '';
               $('fNik').value = '';
@@ -2519,7 +2526,9 @@
               state.dashboardCache = null;
               state.prevIds = {};
               state.currentPage = 1;
-              fetchAndReplace(false, () => {
+              let dataSiap = false, animSelesai = false;
+              const lanjut = () => {
+                if (!dataSiap || !animSelesai) return;
                 state.page = 'data';
                 state.pageToken++;
                 document.querySelectorAll('[data-nav]').forEach(el => {
@@ -2527,30 +2536,41 @@
                 });
                 updateFabVisibility();
                 renderData();
-              });
+              };
+              fetchAndReplace(false, () => { dataSiap = true; lanjut(); });   // data dimuat bersamaan dengan animasi
+              anim.then(() => { animSelesai = true; lanjut(); });
             } else {
               if (r.duplikat && r.duplikat.length) {
+                ks.close();
                 showDupWarning(r.duplikat);
                 state.nikIsDup = true;
                 state.dupData = r.duplikat;
               } else {
-                toast('❌ ' + r.message, 'error');
+                ks.fail(r.message || 'Data belum tersimpan');
               }
             }
           })
           .withFailureHandler(e => {
+            clearTimeout(stepT);
             btn.disabled = false;
             btn.innerHTML = ICONS.save + ' Simpan Data';
-            toast('Gagal: ' + e.message, 'error');
+            ks.fail((e && e.message ? e.message : 'Koneksi bermasalah') + ' — data belum tersimpan, coba lagi.');
           })
           .apiAdd(payload);
       })
       .withFailureHandler(e => {
         btn.disabled = false;
         btn.innerHTML = ICONS.save + ' Simpan Data';
-        toast('Gagal cek NIK: ' + e.message, 'error');
+        ks.fail('Gagal cek NIK: ' + (e && e.message ? e.message : 'koneksi bermasalah'));
       })
       .apiCheckNik({ nik: nik, excludeId: null });
+  }
+
+  // Animasi "kertas suara masuk kotak" (public/js/kotaksuara.js); aman bila skrip belum termuat
+  function kotakSuara(opts) {
+    if (window.KotakSuara) return window.KotakSuara.show(opts);
+    const noop = () => Promise.resolve();
+    return { step() {}, success: noop, fail: noop, close() {} };
   }
 
   function showDupWarning(duplikat) {
@@ -3433,15 +3453,20 @@
     const btn = $('btnVerifSave');
     btn.dataset.busy = '1';
     btn.disabled = true;
+    const pv = (state.allData || []).find(x => String(x.id) === String(state.verifyId)) || {};
+    const ks = kotakSuara({ tone: 'hijau', title: 'Memverifikasi Suara PASTI',
+      step: metode === 'digital' ? 'Mengunggah tanda tangan digital' : 'Mengunggah bukti TTD' });
+    const stepT = setTimeout(() => ks.step('Menyimpan ke data'), 2500);
     btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Memverifikasi...';
 
     google.script.run
       .withSuccessHandler(r => {
+        clearTimeout(stepT);
         delete btn.dataset.busy;
         btn.disabled = false;
         updateVerifBtn();
         if (r.ok) {
-          toast('✅ ' + r.message, 'success');
+          ks.success({ title: 'Suara PASTI ✅', sub: (pv.nama || '') + (pv.kampung ? ' • ' + pv.kampung + ' ' + rtLabel(pv.rt) : '') });
           const p = (state.allData || []).find(x => String(x.id) === String(state.verifyId));
           if (p) {
             p.verified = true;
@@ -3455,14 +3480,15 @@
           if (state.page === 'data') renderData();
           else if (state.page === 'detail-kampung') renderDetailKampung();
         } else {
-          toast('❌ ' + r.message, 'error');
+          ks.fail(r.message || 'Verifikasi belum tersimpan');
         }
       })
       .withFailureHandler(e => {
+        clearTimeout(stepT);
         delete btn.dataset.busy;
         btn.disabled = false;
         updateVerifBtn();
-        toast('Gagal: ' + e.message, 'error');
+        ks.fail((e && e.message ? e.message : 'Koneksi bermasalah') + ' — belum tersimpan, coba lagi.');
       })
       .apiVerifyWithTTD({
         id: state.verifyId,
