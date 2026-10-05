@@ -12,7 +12,7 @@ const ocr = require('../lib/ocr');
 const ktp = require('../lib/ktp');
 const roles = require('../lib/roles');
 
-const DOWNLOAD_JENIS = { KTP: 'DOWNLOAD_KTP', KTP_MASSAL: 'DOWNLOAD_KTP_MASSAL', PDF_KAMPUNG: 'DOWNLOAD_PDF' };
+const DOWNLOAD_JENIS = { KTP: 'DOWNLOAD_KTP', KTP_MASSAL: 'DOWNLOAD_KTP_MASSAL', PDF_KAMPUNG: 'DOWNLOAD_PDF', KTP_TTD: 'DOWNLOAD_KTP_TTD' };
 const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n || 200);
 const siapa = (nama, id) => (nama ? nama : 'ID ' + id);
 const photourl = require('../lib/photourl');
