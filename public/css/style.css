@@ -1721,3 +1721,6 @@ img,canvas,.foto-wrap,.modal-foto{-webkit-touch-callout:none;-webkit-user-select
 .ajak-later{margin-top:8px;font-size:13px;color:var(--muted);padding:8px;font-weight:600}
 .cfg-kk-sub.nt-on{color:#16a34a;font-weight:600}.cfg-kk-sub.nt-off{color:#b45309}
 #modalAjakNotif{z-index:245}
+
+#btnDetailKtpTtd{grid-column:1/-1;width:100%;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+#btnDetailKtpTtd:disabled{background:#fff;border-color:var(--border);color:var(--muted)}

@@ -1023,7 +1023,8 @@
       AKSES_DITOLAK:  ['Akses ditolak', 'warn', 'red'],
       DOWNLOAD_KTP:   ['KTP di-download (PDF A4)', 'download', 'blue'],
       DOWNLOAD_KTP_MASSAL: ['KTP massal di-download', 'download', 'blue'],
-      DOWNLOAD_PDF:   ['PDF data kampung di-download', 'download', 'blue']
+      DOWNLOAD_PDF:   ['PDF data kampung di-download', 'download', 'blue'],
+      DOWNLOAD_KTP_TTD: ['KTP + TTD digital di-download (PDF A4)', 'download', 'blue']
     };
     if (M[a]) return { text: M[a][0], ico: M[a][1], tone: M[a][2] };
     if (/LOGIN/.test(a)) return { text: /GAGAL/.test(a) ? 'Percobaan login gagal' : 'Login berhasil', ico: 'shield', tone: /GAGAL/.test(a) ? 'red' : 'slate' };
@@ -1749,6 +1750,81 @@
       .catch(e => { toast('Gagal ambil foto KTP: ' + e.message, 'error'); finish(); });
   };
 
+  // ============================================================ //
+  // ⭐ DOWNLOAD KTP + TTD DIGITAL → PDF A4 (satu halaman: KTP di atas, TTD digital di bawah) //
+  // Hanya untuk data yang diverifikasi dengan tanda tangan digital.
+  // ============================================================ //
+  function hasTtdDigital(p) { return !!(p && p.metodeTTD === 'digital' && p.fotoTTDId && p.verified); }
+
+  window.__downloadKtpTtd = function(id, btnEl) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) { toast('Data tidak ditemukan', 'error'); return; }
+    if (!hasTtdDigital(p)) { toast('Data ini tidak memiliki tanda tangan digital', 'warn'); return; }
+    if (!p.fotoKTPId) { toast('Belum ada foto KTP untuk data ini', 'error'); return; }
+    if (state.ktpPdfGenerating) return;
+    const { jsPDF } = window.jspdf || {};
+    if (!jsPDF) { toast('Library PDF belum siap, coba lagi', 'error'); return; }
+    state.ktpPdfGenerating = true;
+    const originalHtml = btnEl ? btnEl.innerHTML : '';
+    if (btnEl) {
+      btnEl.disabled = true;
+      btnEl.innerHTML = '<div class="spinner" style="width:15px;height:15px;border-width:2px;margin:0;border-color:rgba(7,89,133,.25);border-top-color:currentColor"></div> Menyiapkan…';
+    }
+    const urls = [];
+    const grab = which => fetchFotoUrl(p, which).then(u => { urls.push(u); return loadImage(u); }).then(img => imgToJpeg(img, 1400));
+    Promise.all([grab('ktp'), grab('ttd')])
+      .then(([ktp, ttd]) => {
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        drawKtpTtdA4Page(doc, ktp, ttd, p);
+        doc.save('KTP_TTD_' + slugify(p.nama) + '_' + (p.nik || '') + '.pdf');
+        toast('✅ PDF KTP + TTD digital siap (A4)', 'success');
+        logDownload('KTP_TTD', 'KTP + TTD digital ' + p.nama + ' / NIK ' + (p.nik || '-') + ' (' + (p.kampung || '-') + ' ' + rtLabel(p.rt) + ')');
+      })
+      .catch(e => { console.error('KTP+TTD error:', e); toast('Gagal membuat PDF: ' + (e && e.message ? e.message : e), 'error'); })
+      .then(() => {
+        urls.forEach(u => { if (String(u).startsWith('blob:')) URL.revokeObjectURL(u); });
+        state.ktpPdfGenerating = false;
+        if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = originalHtml; }
+      });
+  };
+
+  // 1 halaman A4: "KTP" + foto KTP, lalu "TTD Digital" + lembar tanda tangan, di tengah kertas
+  function drawKtpTtdA4Page(doc, ktp, ttd, p) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const fit = (img, maxW, maxH) => {
+      const a = img.w / img.h;
+      let w = maxW, h = maxW / a;
+      if (h > maxH) { h = maxH; w = maxH * a; }
+      return { w, h };
+    };
+    const k = fit(ktp, 100, 64);          // ukuran sama dengan cetak KTP biasa
+    const t = fit(ttd, 120, 82);
+    const labelH = 8, gap = 16;
+    const total = labelH + k.h + gap + labelH + t.h;
+    let y = (pageH - total) / 2;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(15, 23, 42);
+    doc.text('KTP', pageW / 2, y + 5, { align: 'center' });
+    y += labelH;
+    doc.addImage(ktp.dataUrl, 'JPEG', (pageW - k.w) / 2, y, k.w, k.h);
+    y += k.h + gap;
+
+    doc.text('TTD Digital', pageW / 2, y + 5, { align: 'center' });
+    y += labelH;
+    doc.addImage(ttd.dataUrl, 'JPEG', (pageW - t.w) / 2, y, t.w, t.h);
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.rect((pageW - t.w) / 2, y, t.w, t.h);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text(String(p.nama || '') + '  •  ' + String(p.nik || ''), pageW / 2, pageH - 12, { align: 'center' });
+  }
+
   // ⭐ Render ulang gambar lewat canvas → JPEG. Decoder PNG bawaan jsPDF kadang
   // gagal ("Incomplete or corrupt PNG file") walau file PNG-nya valid & bisa
   // ditampilkan browser — canvas re-encode ini menghindari masalah itu.
@@ -1931,13 +2007,16 @@
 
   // Ambil foto KTP sebagai URL objek lewat /api/photo (ter-cache di perangkat & CDN → cepat),
   // cadangan: RPC base64 bila URL tidak tersedia/gagal.
-  function fetchFotoUrl(p) {
-    const url = (p && p.fotoKTP) || (p && p.fotoKTPId ? '/api/photo?id=' + encodeURIComponent(p.fotoKTPId) : '');
+  // which: 'ktp' (default) | 'ttd' (lembar bukti tanda tangan digital)
+  function fetchFotoUrl(p, which) {
+    const ttd = which === 'ttd';
+    const fid = ttd ? p.fotoTTDId : p.fotoKTPId;
+    const url = (ttd ? p.fotoTTD : p.fotoKTP) || (fid ? '/api/photo?id=' + encodeURIComponent(fid) : '');
     const viaRpc = () => new Promise((resolve, reject) => {
       google.script.run
         .withSuccessHandler(r => r && r.ok ? resolve(r.dataUrl) : reject(new Error((r && r.message) || 'Gagal ambil foto')))
         .withFailureHandler(e => reject(e))
-        .apiGetFotoBase64(p.fotoKTPId);
+        .apiGetFotoBase64(fid);
     });
     if (!url) return viaRpc();
     return fetch(url, { credentials: 'same-origin' })
@@ -3298,6 +3377,8 @@
         '<button class="btn wa-btn wa-print" id="btnDetailPrint" type="button">' + ICONS.printer + (isPrinted ? ' Tandai Belum Cetak' : ' Tandai Sudah Cetak') + '</button>' +
         '<button class="btn wa-btn wa-ktp" id="btnDetailKtp" type="button"' + (p.fotoKTPId ? '' : ' disabled') + '>' + ICONS.download + ' Unduh KTP</button>' +
         (isAdmin() ? '<button class="btn wa-btn wa-del" id="btnDetailDel" type="button">' + ICONS.trash + ' Hapus Data</button>' : '') +
+        '<button class="btn wa-btn wa-ktp" id="btnDetailKtpTtd" type="button"' + (hasTtdDigital(p) && p.fotoKTPId ? '' : ' disabled') + ' title="' +
+          (hasTtdDigital(p) ? (p.fotoKTPId ? 'Unduh KTP + TTD digital (A4)' : 'Belum ada foto KTP') : 'Tersedia untuk data yang diverifikasi dengan TTD digital') + '">' + ICONS.download + ' Unduh KTP + TTD Digital</button>' +
       '</div>');
 
     if (window.FotoAman) window.FotoAman.hydrate(content);
@@ -3324,6 +3405,7 @@
     bindDetail('btnDetailDel', () => { closeDetail(); window.__deleteData(p.id, p.nama); });
     bindDetail('btnDetailPrint', el => { closeDetail(); window.__togglePrint(p.id, null); });
     bindDetail('btnDetailKtp', el => window.__downloadKtpA4(p.id, el));
+    bindDetail('btnDetailKtpTtd', el => window.__downloadKtpTtd(p.id, el));
 
     const btnUnverify = $('btnDetailUnverify');
     if (btnUnverify) {
