@@ -1336,6 +1336,46 @@
   // ============================================================ //
   // ⭐ HALAMAN DETAIL KAMPUNG (dengan Sort A-Z)                   //
   // ============================================================ //
+
+  /** Judul kolom tabel detail kampung — dipakai tabel di layar DAN PDF agar selalu sama */
+  const DETAIL_KAMPUNG_COLS = ['NO', 'NIK', 'NAMA', 'TEMPAT LAHIR', 'TANGGAL LAHIR', 'UMUR', 'STATUS PERKAWINAN', 'JENIS KELAMIN', 'ALAMAT', 'RT', 'STATUS'];
+
+  /** "1990-03-25" → "25-03-1990" (format ringkas untuk tabel); kosong → '-' */
+  function formatTglTabel(ymd) {
+    const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return m[3] + '-' + m[2] + '-' + m[1];
+    return ymd ? String(ymd) : '-';
+  }
+
+  /**
+   * Isi satu baris tabel detail kampung (urutan = DETAIL_KAMPUNG_COLS).
+   * @returns {{no: string, nik: string, nama: string, tempatLahir: string, tanggalLahir: string, umur: string,
+   *   statusPerkawinan: string, jenisKelamin: string, alamat: string, rt: string, status: string, verified: boolean}}
+   */
+  function detailKampungRow(p, idx) {
+    const dash = v => (String(v == null ? '' : v).trim() || '-');
+    const rt = normRT(p.rt);
+    const kampung = String(p.kampung || '').trim();
+    return {
+      no: String(idx + 1),
+      nik: dash(p.nik),
+      nama: dash(p.nama),
+      tempatLahir: dash(p.tempatLahir),
+      tanggalLahir: formatTglTabel(p.tanggalLahir),
+      umur: p.usia ? String(p.usia) : '-',
+      statusPerkawinan: dash(p.statusPerkawinan),
+      jenisKelamin: dash(p.jenisKelamin),
+      alamat: kampung ? 'Kp. ' + kampung + ' ' + rtLabel(rt) : rtLabel(rt),
+      rt: rt === RT_UMUM ? 'UMUM' : rt,
+      status: p.verified === true ? 'PASTI' : 'BELUM',
+      verified: p.verified === true
+    };
+  }
+
+  function detailKampungRowArray(r) {
+    return [r.no, r.nik, r.nama, r.tempatLahir, r.tanggalLahir, r.umur, r.statusPerkawinan, r.jenisKelamin, r.alamat, r.rt, r.status];
+  }
+
   function renderDetailKampung() {
     const c = $('appContent');
     if (!c) return;
@@ -1451,25 +1491,22 @@
           '<p>Belum ada pendukung untuk filter ini</p>' +
         '</div>';
     } else {
-      tableHtml = '<div class="table-scroll"><table class="data-table"><thead><tr>' +
-        '<th class="col-no">NO</th>' +
-        '<th>NAMA</th>' +
-        '<th class="col-nik">NIK</th>' +
-        '<th class="col-status">STATUS</th>' +
+      // kelas per kolom (urutan = DETAIL_KAMPUNG_COLS) untuk perataan & lebar
+      const colCls = ['col-no', 'col-nik', 'col-nama', 'col-tempat', 'col-tgl', 'col-umur', 'col-kawin', 'col-jk', 'col-alamat', 'col-rt', 'col-status'];
+      tableHtml = '<div class="table-scroll-hint">↔ Geser tabel ke samping untuk melihat semua kolom</div>' +
+        '<div class="table-scroll"><table class="data-table data-table-wide"><thead><tr>' +
+        DETAIL_KAMPUNG_COLS.map((h, i) => '<th class="' + colCls[i] + '">' + h + '</th>').join('') +
         '</tr></thead><tbody>';
       filtered.forEach((p, idx) => {
-        const isVerified = p.verified === true;
-        const statusClass = isVerified ? 'verified' : 'unverified';
-        const statusLabel = isVerified ? 'PASTI' : 'BELUM';
-        tableHtml +=
-          '<tr>' +
-            '<td class="col-no">' + (idx + 1) + '</td>' +
-            '<td class="col-nama">' + esc(p.nama) + '</td>' +
-            '<td class="col-nik">' + esc(p.nik) + '</td>' +
-            '<td class="col-status">' +
-              '<span class="status-dot ' + statusClass + '" title="' + statusLabel + '"></span>' +
-            '</td>' +
-          '</tr>';
+        const r = detailKampungRow(p, idx);
+        const cells = detailKampungRowArray(r);
+        tableHtml += '<tr>' + cells.map((v, i) => {
+          if (colCls[i] === 'col-status') {
+            const cls = r.verified ? 'verified' : 'unverified';
+            return '<td class="col-status"><span class="status-pill ' + cls + '"><span class="status-dot ' + cls + '"></span>' + esc(v) + '</span></td>';
+          }
+          return '<td class="' + colCls[i] + (v === '-' ? ' is-empty' : '') + '">' + esc(v) + '</td>';
+        }).join('') + '</tr>';
       });
       tableHtml += '</tbody></table></div>';
       tableHtml += '<div class="table-footer">Total: ' + filtered.length + ' data' +
@@ -1521,6 +1558,14 @@
       '</div>' +
 
       '<div class="table-wrap">' + tableHtml + '</div>';
+
+    // Petunjuk "geser" hanya bila tabel lebih lebar dari layar; hilang setelah tabel digeser
+    const tScroll = c.querySelector('.table-scroll');
+    const tHint = c.querySelector('.table-scroll-hint');
+    if (tScroll && tHint) {
+      tHint.classList.toggle('show', tScroll.scrollWidth > tScroll.clientWidth + 4);
+      tScroll.addEventListener('scroll', () => tHint.classList.remove('show'), { once: true, passive: true });
+    }
 
     // Bind back
     const btnBack = $('btnBackDetail');
@@ -1593,13 +1638,14 @@
         return;
       }
 
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      // A4 mendatar: 11 kolom (NO s.d. STATUS) muat & tetap terbaca
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
-      const marginL = 15;
-      const marginR = 15;
-      const marginT = 15;
-      const marginB = 15;
+      const marginL = 10;
+      const marginR = 10;
+      const marginT = 12;
+      const marginB = 14;
 
       let y = marginT;
 
@@ -1633,42 +1679,49 @@
       doc.text('Total: ' + dataList.length + ' pendukung  |  Dicetak: ' + formatTanggalIndo(new Date()), marginL, y);
       y += 5;
 
-      const bodyRows = dataList.map((p, idx) => {
-        const isVerified = p.verified === true;
-        const statusText = isVerified ? 'PASTI' : 'BELUM';
-        return [String(idx + 1), p.nama || '', p.nik || '', statusText];
-      });
+      const bodyRows = dataList.map((p, idx) => detailKampungRowArray(detailKampungRow(p, idx)));
+      const COL_STATUS = DETAIL_KAMPUNG_COLS.length - 1;
+      const TOTAL_PAGES = '{total}';
 
       doc.autoTable({
         startY: y,
-        head: [['NO', 'NAMA', 'NIK', 'STATUS']],
+        head: [DETAIL_KAMPUNG_COLS],
         body: bodyRows,
         theme: 'grid',
         headStyles: {
           fillColor: [13, 110, 63],
           textColor: [255, 255, 255],
           fontStyle: 'bold',
-          fontSize: 10,
+          fontSize: 7.5,
           halign: 'center',
           valign: 'middle',
-          cellPadding: 2.5
+          cellPadding: 1.8
         },
         bodyStyles: {
-          fontSize: 9.5,
+          fontSize: 8,
           textColor: [15, 23, 42],
-          cellPadding: 2.2,
-          valign: 'middle'
+          cellPadding: 1.8,
+          valign: 'middle',
+          overflow: 'linebreak'
         },
         alternateRowStyles: { fillColor: [240, 253, 244] },
+        // lebar total = 277 mm (A4 mendatar dikurangi margin); NAMA mengambil sisa ruang
         columnStyles: {
-          0: { cellWidth: 15, halign: 'center', fontStyle: 'bold' },
-          1: { cellWidth: 'auto', halign: 'left' },
-          2: { cellWidth: 50, halign: 'left', font: 'courier' },
-          3: { cellWidth: 25, halign: 'center', fontStyle: 'bold' }
+          0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },   // NO
+          1: { cellWidth: 33, halign: 'left', font: 'courier' },       // NIK
+          2: { cellWidth: 'auto', halign: 'left' },                    // NAMA
+          3: { cellWidth: 26, halign: 'left' },                        // TEMPAT LAHIR
+          4: { cellWidth: 21, halign: 'center' },                      // TANGGAL LAHIR
+          5: { cellWidth: 12, halign: 'center' },                      // UMUR
+          6: { cellWidth: 23, halign: 'center' },                      // STATUS PERKAWINAN
+          7: { cellWidth: 20, halign: 'center' },                      // JENIS KELAMIN
+          8: { cellWidth: 38, halign: 'left' },                        // ALAMAT
+          9: { cellWidth: 12, halign: 'center' },                      // RT
+          10: { cellWidth: 17, halign: 'center', fontStyle: 'bold' }   // STATUS
         },
         margin: { left: marginL, right: marginR, top: marginT, bottom: marginB },
         didParseCell: function(data) {
-          if (data.section === 'body' && data.column.index === 3) {
+          if (data.section === 'body' && data.column.index === COL_STATUS) {
             const statusVal = String(data.cell.raw || '').toUpperCase();
             if (statusVal === 'PASTI') {
               data.cell.styles.textColor = [5, 150, 105];
@@ -1681,14 +1734,15 @@
         },
         didDrawPage: function(data) {
           const pageNum = doc.internal.getCurrentPageInfo().pageNumber;
-          const totalPages = doc.internal.getNumberOfPages();
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
           doc.setTextColor(148, 163, 184);
-          doc.text('Halaman ' + pageNum + ' dari ' + totalPages, pageW / 2, pageH - 8, { align: 'center' });
+          // jumlah halaman belum diketahui saat halaman digambar → ditulis placeholder, diganti setelah tabel selesai
+          doc.text('Halaman ' + pageNum + ' dari ' + TOTAL_PAGES, pageW / 2, pageH - 8, { align: 'center' });
           doc.text('Data Pendukung Pak Emen - Pilkades 2026', marginL, pageH - 8);
         }
       });
+      if (typeof doc.putTotalPages === 'function') doc.putTotalPages(TOTAL_PAGES);
 
       const statusSuffix = verifFilter === 'true' ? '_PASTI' : (verifFilter === 'false' ? '_BELUM' : '_SEMUA');
       const rtSuffix = rtFilter ? ('_' + (rtFilter === RT_UMUM ? 'UMUM' : ('RT_' + normRT(rtFilter)))) : '_SemuaRT';
