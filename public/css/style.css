@@ -1580,7 +1580,7 @@ body.kcam-open{overflow:hidden}
 @keyframes ocrspin{to{transform:rotate(360deg)}}
 .ocr-st ul{margin:6px 0 0 16px;padding:0}
 .ocr-apply{margin-top:8px;padding:7px 12px;border-radius:9px;background:#fff;border:1px solid currentColor;font-weight:800;font-size:12px;color:inherit}
-input.auto-fill{background:#f0fdf4 !important;border-color:#86efac !important}
+input.auto-fill,select.auto-fill,textarea.auto-fill{background-color:#f0fdf4 !important;border-color:#86efac !important}
 .foto-tools svg{width:16px !important;height:16px !important;flex:none}
 .foto-tools button{font-size:12.5px;white-space:nowrap}
 

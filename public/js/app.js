@@ -2212,7 +2212,7 @@
             '<div class="foto-box" id="fotoBox">' +
               '<div class="foto-placeholder" id="fotoPlaceholder">' +
                 '<div class="ico">' + ICONS.card + '</div>' +
-                'Ambil foto KTP — Nama & NIK terisi otomatis' +
+                'Ambil foto KTP — data diri terisi otomatis' +
               '</div>' +
               '<img id="fotoPreview" class="foto-preview" style="display:none" alt="">' +
               '<div class="foto-btns">' +
@@ -2554,7 +2554,7 @@
   function runKtpOcr(imgUrl) {
     if (!$('ocrSt') || !imgUrl) return;
     const token = state.ocrToken = (state.ocrToken || 0) + 1;
-    setOcrStatus('busy', '<div class="ocr-row"><span class="ocr-spin"></span><span>Membaca Nama & NIK dari KTP…</span></div>');
+    setOcrStatus('busy', '<div class="ocr-row"><span class="ocr-spin"></span><span>Membaca data dari KTP…</span></div>');
     // foto buram/gelap: beri peringatan dini (tetap dicoba dibaca)
     let tip = '';
     try {
@@ -2621,10 +2621,13 @@
     };
     tryField('fNik', 'NIK', d.nik, d.nikValid);
     tryField('fNama', 'Nama', d.nama, !!d.nama);
+    tryField('fTempatLahir', 'Tempat Lahir', d.tempatLahir, true);
+    if (STATUS_KAWIN_LIST.indexOf(d.statusPerkawinan) !== -1) tryField('fStatusKawin', 'Status Perkawinan', d.statusPerkawinan, true);
+    tryField('fAlamat', 'Alamat', d.alamat, true);
     let html = '';
     const sure = applied.length && d.confidence === 'high';
     if (applied.length) {
-      html += (sure ? '✅ <b>Terbaca otomatis:</b> ' : '⚠️ <b>Terisi otomatis (mohon cek):</b> ') + applied.join(' & ') + '. Periksa kembali sebelum menyimpan.' + (r.ms ? ' <span style="opacity:.7">(' + (r.ms / 1000).toFixed(1) + ' dtk)</span>' : '');
+      html += (sure ? '✅ <b>Terbaca otomatis:</b> ' : '⚠️ <b>Terisi otomatis (mohon cek):</b> ') + applied.join(', ').replace(/, ([^,]*)$/, ' & $1') + '. Periksa kembali sebelum menyimpan.' + (r.ms ? ' <span style="opacity:.7">(' + (r.ms / 1000).toFixed(1) + ' dtk)</span>' : '');
     }
     if (offers.length) {
       html += (html ? '<br>' : '') + offers.map(o =>
