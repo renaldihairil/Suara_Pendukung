@@ -6,7 +6,6 @@
   const RT_UMUM = 'UMUM';
   const STATUS_KAWIN_LIST = ['Belum Kawin', 'Kawin', 'Cerai Hidup', 'Cerai Mati'];
   const MAX_TEMPAT_LAHIR = 60;
-  const MAX_ALAMAT = 300;
   const POLL_INTERVAL = 4000;  // cek sinyal perubahan (/api/rev, di-cache CDN ±2 dtk → hemat kuota Google Sheets)
   const PER_PAGE = 15;
 
@@ -1729,7 +1728,7 @@
     return formatTanggalIndo(new Date(+m[1], +m[2] - 1, +m[3]));
   }
 
-  /** Isian Tempat Lahir, Status Perkawinan & Alamat (dipakai form Input dan Edit) */
+  /** Isian Tempat Lahir & Status Perkawinan (dipakai form Input dan Edit) */
   function dataDiriFieldsHtml(prefix, p) {
     p = p || {};
     let statusOpts = '<option value="">-- Pilih Status --</option>';
@@ -1748,10 +1747,6 @@
           '<label class="form-label" for="' + prefix + 'StatusKawin">Status Perkawinan</label>' +
           '<select class="form-select" id="' + prefix + 'StatusKawin">' + statusOpts + '</select>' +
         '</div>' +
-      '</div>' +
-      '<div class="form-group">' +
-        '<label class="form-label" for="' + prefix + 'Alamat">Alamat</label>' +
-        '<textarea class="form-input form-textarea" id="' + prefix + 'Alamat" rows="3" maxlength="' + MAX_ALAMAT + '" placeholder="Contoh: Jl. Raya Seruni No. 12, Dusun …">' + esc(p.alamat || '') + '</textarea>' +
       '</div>';
   }
 
@@ -1759,8 +1754,7 @@
   function readDataDiriFields(prefix) {
     return {
       tempatLahir: $(prefix + 'TempatLahir').value.replace(/\s+/g, ' ').trim(),
-      statusPerkawinan: $(prefix + 'StatusKawin').value,
-      alamat: $(prefix + 'Alamat').value.trim()
+      statusPerkawinan: $(prefix + 'StatusKawin').value
     };
   }
 
@@ -2623,7 +2617,6 @@
     tryField('fNama', 'Nama', d.nama, !!d.nama);
     tryField('fTempatLahir', 'Tempat Lahir', d.tempatLahir, true);
     if (STATUS_KAWIN_LIST.indexOf(d.statusPerkawinan) !== -1) tryField('fStatusKawin', 'Status Perkawinan', d.statusPerkawinan, true);
-    tryField('fAlamat', 'Alamat', d.alamat, true);
     let html = '';
     const sure = applied.length && d.confidence === 'high';
     if (applied.length) {
@@ -2697,7 +2690,6 @@
               $('fNik').value = '';
               $('fTempatLahir').value = '';
               $('fStatusKawin').value = '';
-              $('fAlamat').value = '';
               $('fKampung').value = '';
               $('fRt').value = '';
               $('nikPreview').style.display = 'none';
@@ -3360,10 +3352,10 @@
   }
 
   /** Satu baris info di detail pendukung; nilai kosong (data lama) tampil sebagai "-" */
-  function infoRow(label, value, extraClass) {
+  function infoRow(label, value) {
     const v = String(value == null ? '' : value).trim();
     return '<div class="warga-info-row"><span class="lbl">' + esc(label) + '</span>' +
-      '<span class="val' + (extraClass ? ' ' + extraClass : '') + (v ? '' : ' kosong') + '">' + (v ? esc(v) : '-') + '</span></div>';
+      '<span class="val' + (v ? '' : ' kosong') + '">' + (v ? esc(v) : '-') + '</span></div>';
   }
 
   function renderModalDetailWarga(p) {
@@ -3405,7 +3397,6 @@
           infoRow('Status Perkawinan', p.statusPerkawinan) +
           '<div class="warga-info-row"><span class="lbl">Kampung</span><span class="val">' + esc(p.kampung) + '</span></div>' +
           '<div class="warga-info-row"><span class="lbl">RT</span><span class="val">' + rtLabel(p.rt) + '</span></div>' +
-          infoRow('Alamat', p.alamat, 'multiline') +
         '</div>' +
       '</div>' +
 

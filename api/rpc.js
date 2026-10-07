@@ -221,11 +221,11 @@ module.exports = async (req, res) => {
           if (lama) {
             const domain = require('../lib/domain');
             const cmp = [['nama', 'nama'], ['nik', 'NIK'], ['kampung', 'kampung'], ['rt', 'RT'],
-              ['tempatLahir', 'tempat lahir'], ['statusPerkawinan', 'status perkawinan'], ['alamat', 'alamat']];
+              ['tempatLahir', 'tempat lahir'], ['statusPerkawinan', 'status perkawinan']];
             const norm = (k, v) => {
               if (k === 'rt') return domain.normRT(v);
               if (k === 'statusPerkawinan') return domain.normStatusKawin(v) || '';
-              return domain.cleanText(v, 0, k === 'alamat');
+              return domain.cleanText(v);
             };
             cmp.forEach(([k, lbl]) => {
               if (params[k] == null) return;
