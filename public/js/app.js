@@ -4,6 +4,9 @@
   // ============================================================ //
   const RT_LIST = ['001','002','003','004','005','006','007','008','009','010','UMUM'];
   const RT_UMUM = 'UMUM';
+  const STATUS_KAWIN_LIST = ['Belum Kawin', 'Kawin', 'Cerai Hidup', 'Cerai Mati'];
+  const MAX_TEMPAT_LAHIR = 60;
+  const MAX_ALAMAT = 300;
   const POLL_INTERVAL = 4000;  // cek sinyal perubahan (/api/rev, di-cache CDN ±2 dtk → hemat kuota Google Sheets)
   const PER_PAGE = 15;
 
@@ -1719,6 +1722,48 @@
     return d.getDate() + ' ' + bulan[d.getMonth()] + ' ' + d.getFullYear();
   }
 
+  /** "1990-03-25" → "25 Maret 1990" (teks lain dikembalikan apa adanya, kosong → '-') */
+  function formatTglLahir(ymd) {
+    const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return ymd ? String(ymd) : '-';
+    return formatTanggalIndo(new Date(+m[1], +m[2] - 1, +m[3]));
+  }
+
+  /** Isian Tempat Lahir, Status Perkawinan & Alamat (dipakai form Input dan Edit) */
+  function dataDiriFieldsHtml(prefix, p) {
+    p = p || {};
+    let statusOpts = '<option value="">-- Pilih Status --</option>';
+    STATUS_KAWIN_LIST.forEach(s => {
+      statusOpts += '<option value="' + esc(s) + '"' + (p.statusPerkawinan === s ? ' selected' : '') + '>' + esc(s) + '</option>';
+    });
+    if (p.statusPerkawinan && STATUS_KAWIN_LIST.indexOf(p.statusPerkawinan) === -1) {
+      statusOpts += '<option value="' + esc(p.statusPerkawinan) + '" selected>' + esc(p.statusPerkawinan) + '</option>';
+    }
+    return '<div class="form-row">' +
+        '<div class="form-group">' +
+          '<label class="form-label" for="' + prefix + 'TempatLahir">Tempat Lahir</label>' +
+          '<input type="text" class="form-input" id="' + prefix + 'TempatLahir" placeholder="Contoh: Mataram" maxlength="' + MAX_TEMPAT_LAHIR + '" autocomplete="off" value="' + esc(p.tempatLahir || '') + '">' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label class="form-label" for="' + prefix + 'StatusKawin">Status Perkawinan</label>' +
+          '<select class="form-select" id="' + prefix + 'StatusKawin">' + statusOpts + '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label" for="' + prefix + 'Alamat">Alamat</label>' +
+        '<textarea class="form-input form-textarea" id="' + prefix + 'Alamat" rows="3" maxlength="' + MAX_ALAMAT + '" placeholder="Contoh: Jl. Raya Seruni No. 12, Dusun …">' + esc(p.alamat || '') + '</textarea>' +
+      '</div>';
+  }
+
+  /** Nilai isian Data Diri tambahan dari form (prefix 'f' = Input, 'e' = Edit) */
+  function readDataDiriFields(prefix) {
+    return {
+      tempatLahir: $(prefix + 'TempatLahir').value.replace(/\s+/g, ' ').trim(),
+      statusPerkawinan: $(prefix + 'StatusKawin').value,
+      alamat: $(prefix + 'Alamat').value.trim()
+    };
+  }
+
   function formatTanggalFile(d) {
     const pad = n => String(n).padStart(2, '0');
     return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes());
@@ -2197,6 +2242,7 @@
               '</div>' +
             '</div>' +
             '<div class="nik-preview" id="nikPreview"></div>' +
+            dataDiriFieldsHtml('f') +
           '</section>' +
 
           '<section class="form-section">' +
@@ -2631,7 +2677,7 @@
           return;
         }
         btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Menyimpan...';
-        const payload = { nama, nik, kampung, rt, fotoBase64: state.fotoBase64, fotoMime: state.fotoMime };
+        const payload = Object.assign({ nama, nik, kampung, rt, fotoBase64: state.fotoBase64, fotoMime: state.fotoMime }, readDataDiriFields('f'));
         ks.step(state.fotoBase64 ? 'Mengunggah foto KTP' : 'Menyimpan ke data');
         const stepT = state.fotoBase64 ? setTimeout(() => ks.step('Menyimpan ke data'), 2500) : null;
         google.script.run
@@ -2646,6 +2692,9 @@
               if (r.version) state.version = r.version;
               $('fNama').value = '';
               $('fNik').value = '';
+              $('fTempatLahir').value = '';
+              $('fStatusKawin').value = '';
+              $('fAlamat').value = '';
               $('fKampung').value = '';
               $('fRt').value = '';
               $('nikPreview').style.display = 'none';
@@ -3307,6 +3356,13 @@
     return '<div class="foto-wrap"><img class="warga-foto" src="' + esc(url) + '" alt="' + esc(alt) + '"></div>';
   }
 
+  /** Satu baris info di detail pendukung; nilai kosong (data lama) tampil sebagai "-" */
+  function infoRow(label, value, extraClass) {
+    const v = String(value == null ? '' : value).trim();
+    return '<div class="warga-info-row"><span class="lbl">' + esc(label) + '</span>' +
+      '<span class="val' + (extraClass ? ' ' + extraClass : '') + (v ? '' : ' kosong') + '">' + (v ? esc(v) : '-') + '</span></div>';
+  }
+
   function renderModalDetailWarga(p) {
     const content = $('modalDetailWargaContent');
     if (!content) return;
@@ -3341,8 +3397,12 @@
           '<div class="warga-info-row"><span class="lbl">NIK</span><span class="val mono">' + esc(p.nik) + '</span></div>' +
           '<div class="warga-info-row"><span class="lbl">Jenis Kelamin</span><span class="val">' + esc(p.jenisKelamin) + '</span></div>' +
           '<div class="warga-info-row"><span class="lbl">Usia</span><span class="val">' + (p.usia || '-') + ' tahun</span></div>' +
+          infoRow('Tempat Lahir', p.tempatLahir) +
+          infoRow('Tanggal Lahir', p.tanggalLahir ? formatTglLahir(p.tanggalLahir) : '') +
+          infoRow('Status Perkawinan', p.statusPerkawinan) +
           '<div class="warga-info-row"><span class="lbl">Kampung</span><span class="val">' + esc(p.kampung) + '</span></div>' +
           '<div class="warga-info-row"><span class="lbl">RT</span><span class="val">' + rtLabel(p.rt) + '</span></div>' +
+          infoRow('Alamat', p.alamat, 'multiline') +
         '</div>' +
       '</div>' +
 
@@ -3910,6 +3970,7 @@
         '<input type="tel" class="form-input" id="eNik" value="' + esc(p.nik) + '" maxlength="16" inputmode="numeric">' +
         '<div class="nik-preview" id="eNikPreview" style="display:block">🔒 NIK tidak boleh sama dengan orang lain</div>' +
       '</div>' +
+      dataDiriFieldsHtml('e', p) +
       '<div class="form-row">' +
         '<div class="form-group">' +
           '<label class="form-label">Kampung</label>' +
@@ -4099,11 +4160,11 @@
     btn.disabled = true;
     btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div>';
 
-    const payload = {
+    const payload = Object.assign({
       id, nama, nik, kampung, rt,
       fotoBase64: state.fotoBase64,
       fotoMime: state.fotoMime
-    };
+    }, readDataDiriFields('e'));
 
     if (state.editFotoTTDBase64) {
       payload.fotoTTDBase64 = state.editFotoTTDBase64;

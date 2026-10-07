@@ -220,12 +220,18 @@ module.exports = async (req, res) => {
           const ch = [];
           if (lama) {
             const domain = require('../lib/domain');
-            const cmp = [['nama', 'nama'], ['nik', 'NIK'], ['kampung', 'kampung'], ['rt', 'RT']];
+            const cmp = [['nama', 'nama'], ['nik', 'NIK'], ['kampung', 'kampung'], ['rt', 'RT'],
+              ['tempatLahir', 'tempat lahir'], ['statusPerkawinan', 'status perkawinan'], ['alamat', 'alamat']];
+            const norm = (k, v) => {
+              if (k === 'rt') return domain.normRT(v);
+              if (k === 'statusPerkawinan') return domain.normStatusKawin(v) || '';
+              return domain.cleanText(v, 0, k === 'alamat');
+            };
             cmp.forEach(([k, lbl]) => {
               if (params[k] == null) return;
-              const baru = k === 'rt' ? domain.normRT(params[k]) : String(params[k]).trim();
-              const old = k === 'rt' ? domain.normRT(lama[k]) : String(lama[k] || '').trim();
-              if (baru !== old) ch.push(lbl + ' ' + clip(old, 40) + ' → ' + clip(baru, 40));
+              const baru = norm(k, params[k]);
+              const old = norm(k, lama[k]);
+              if (baru !== old) ch.push(lbl + ' ' + (clip(old, 40) || '(kosong)') + ' → ' + (clip(baru, 40) || '(kosong)'));
             });
           }
           if (params.fotoBase64) ch.push('foto KTP diganti');
