@@ -1529,6 +1529,14 @@ body.sel-mode .fab-scan,body.notif-open .fab-scan{display:none!important}
   .hh-count{width:116px;height:116px}.hh-num{font-size:50px}.hh-title{font-size:21px}
 }
 .stat-grid + .hh-slot-mid{margin-top:14px}
+/* Keterangan PASTI/BELUM mengikuti posisi kartu hitung mundur: desktop di atas statistik, HP di atas grafik */
+.legend-note.legend-slot-top{display:none;margin:0 0 12px}
+.legend-note.legend-slot-mid{margin:14px 0 12px}
+@media(min-width:900px){
+  .legend-note.legend-slot-top{display:flex}
+  .legend-note.legend-slot-mid{display:none}
+}
+.dash-activity{margin-top:24px}
 @media(max-width:380px){.hh-count{width:84px;height:84px}.hh-num{font-size:34px}.hh-title{font-size:16px}}
 .hh-opt{font-weight:500;color:var(--muted);font-size:11.5px}
 .hh-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:6px}

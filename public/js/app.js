@@ -1279,10 +1279,19 @@
         '<div class="sc-pct">' + persen + '% tercapai</div>' +
       '</div>';
 
+    // Keterangan PASTI/BELUM selalu tepat di atas kartu hitung mundur Hari H
+    // (slot 'top' tampil di desktop, slot 'mid' di HP — sama seperti kartu hitung mundur)
+    const legendHtml = slot =>
+      '<div class="legend-note legend-slot-' + slot + '">' +
+        '<span><i class="lg-dot lg-verified"></i><b>PASTI</b> = Fotokopi KTP ber-TTD / TTD digital</span>' +
+        '<span><i class="lg-dot lg-unverified"></i><b>BELUM</b> = Belum TTD</span>' +
+      '</div>';
+
     c.innerHTML =
       pageHead(esc(greet.judul) + ' <span class="wave">' + greet.emoji + '</span>',
         '<span class="greet-msg js-greet" title="Ketuk untuk kalimat lain">' + esc(greet.pesan) + '</span>', dateCard) +
       warnHtml +
+      legendHtml('top') +
       hariHBannerHtml(d.hariH, 'top') +
       // 7 kartu dalam satu grid: Total melebar 2 kolom (desktop: Total+Laki-laki+Perempuan | 4 kartu status; HP: Total 1 baris, sisanya 2 per baris)
       '<div class="stat-grid">' +
@@ -1294,9 +1303,11 @@
         statCard('printed-card', 'indigo', ICONS.printer, 'Sudah Dicetak', fmtNum(totalDicetak), pctDicetak + '% sudah print out') +
         statCard('unprinted-card', 'amber', ICONS.printer, 'Belum Dicetak', fmtNum(totalBelumCetak), pctBelumCetak + '% belum print out') +
       '</div>' +
+      legendHtml('mid') +
       hariHBannerHtml(d.hariH, 'mid') +            // HP: hitung mundur tepat di atas grafik per kampung
 
-      '<div class="dash-cols' + (isAdmin() ? '' : ' single') + '">' +
+      // Urutan: grafik per kampung → rincian per kampung → aktivitas terbaru (paling bawah, khusus Super Admin)
+      '<div class="dash-cols single">' +
         '<section class="card chart-card">' +
           '<div class="card-head">' +
             '<div class="card-title"><span class="ct-ico">' + ICONS.home + '</span>Data Pendukung per Kampung</div>' +
@@ -1304,22 +1315,21 @@
           '</div>' +
           kampungChartHtml(list, d.perKampung || {}) +
         '</section>' +
-        (isAdmin() ?
+      '</div>' +
+
+      '<div class="section-title">Rincian per Kampung <span class="st-hint">Klik untuk detail</span></div>' +
+      '<div class="kampung-list">' + kampungHtml + '</div>' +
+
+      (isAdmin() ?
+      '<div class="dash-cols single dash-activity">' +
         '<section class="card activity-card">' +
           '<div class="card-head">' +
             '<div class="card-title"><span class="ct-ico">' + ICONS.clock + '</span>Aktivitas Terbaru</div>' +
             '<button class="card-link" id="btnAllLogs" type="button">Lihat Semua ' + ICONS.arrowRight + '</button>' +
           '</div>' +
           '<div id="dashActivity">' + dashActivityHtml() + '</div>' +
-        '</section>' : '') +
-      '</div>' +
-
-      '<div class="legend-note">' +
-        '<span><i class="lg-dot lg-verified"></i><b>PASTI</b> = Fotokopi KTP ber-TTD / TTD digital</span>' +
-        '<span><i class="lg-dot lg-unverified"></i><b>BELUM</b> = Belum TTD</span>' +
-      '</div>' +
-      '<div class="section-title">Rincian per Kampung <span class="st-hint">Klik untuk detail</span></div>' +
-      '<div class="kampung-list">' + kampungHtml + '</div>';
+        '</section>' +
+      '</div>' : '');
 
     c.querySelectorAll('[data-kampung]').forEach(el => {
       el.addEventListener('click', () => {
