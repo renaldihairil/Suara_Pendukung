@@ -566,14 +566,13 @@ svg{display:block}
 .status-dot{display:inline-block;width:16px;height:16px;border-radius:50%;vertical-align:middle;transition:all .2s}
 .status-dot.verified{background:linear-gradient(135deg,var(--verified),var(--verified-dark));box-shadow:0 0 0 4px rgba(16,185,129,.18)}
 .status-dot.unverified{background:linear-gradient(135deg,#cbd5e1,#94a3b8);box-shadow:0 0 0 4px rgba(148,163,184,.16)}
-/* Tabel lengkap detail kampung (11 kolom): digeser ke samping di layar sempit */
-.data-table-wide{min-width:1180px}
+/* Tabel lengkap detail kampung (10 kolom): digeser ke samping di layar sempit */
+.data-table-wide{min-width:1100px}
 .data-table-wide th,.data-table-wide td{white-space:nowrap;padding:11px 12px}
 .data-table-wide th.col-no,.data-table-wide td.col-no{width:48px;text-align:center}
 .data-table-wide td.col-nama{white-space:normal;min-width:170px;max-width:240px}
 .data-table-wide td.col-alamat{white-space:normal;min-width:150px}
 .data-table-wide th.col-umur,.data-table-wide td.col-umur,
-.data-table-wide th.col-rt,.data-table-wide td.col-rt,
 .data-table-wide th.col-tgl,.data-table-wide td.col-tgl{text-align:center}
 .data-table-wide th.col-status{width:96px}
 .data-table-wide td.col-tgl{font-variant-numeric:tabular-nums}

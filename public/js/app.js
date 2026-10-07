@@ -1338,7 +1338,7 @@
   // ============================================================ //
 
   /** Judul kolom tabel detail kampung — dipakai tabel di layar DAN PDF agar selalu sama */
-  const DETAIL_KAMPUNG_COLS = ['NO', 'NIK', 'NAMA', 'TEMPAT LAHIR', 'TANGGAL LAHIR', 'UMUR', 'STATUS PERKAWINAN', 'JENIS KELAMIN', 'ALAMAT', 'RT', 'STATUS'];
+  const DETAIL_KAMPUNG_COLS = ['NO', 'NIK', 'NAMA', 'TEMPAT LAHIR', 'TANGGAL LAHIR', 'UMUR', 'STATUS PERKAWINAN', 'JENIS KELAMIN', 'ALAMAT', 'STATUS'];
 
   /** "1990-03-25" → "25-03-1990" (format ringkas untuk tabel); kosong → '-' */
   function formatTglTabel(ymd) {
@@ -1350,7 +1350,7 @@
   /**
    * Isi satu baris tabel detail kampung (urutan = DETAIL_KAMPUNG_COLS).
    * @returns {{no: string, nik: string, nama: string, tempatLahir: string, tanggalLahir: string, umur: string,
-   *   statusPerkawinan: string, jenisKelamin: string, alamat: string, rt: string, status: string, verified: boolean}}
+   *   statusPerkawinan: string, jenisKelamin: string, alamat: string, status: string, verified: boolean}}
    */
   function detailKampungRow(p, idx) {
     const dash = v => (String(v == null ? '' : v).trim() || '-');
@@ -1366,14 +1366,13 @@
       statusPerkawinan: dash(p.statusPerkawinan),
       jenisKelamin: dash(p.jenisKelamin),
       alamat: kampung ? 'Kp. ' + kampung + ' ' + rtLabel(rt) : rtLabel(rt),
-      rt: rt === RT_UMUM ? 'UMUM' : rt,
       status: p.verified === true ? 'PASTI' : 'BELUM',
       verified: p.verified === true
     };
   }
 
   function detailKampungRowArray(r) {
-    return [r.no, r.nik, r.nama, r.tempatLahir, r.tanggalLahir, r.umur, r.statusPerkawinan, r.jenisKelamin, r.alamat, r.rt, r.status];
+    return [r.no, r.nik, r.nama, r.tempatLahir, r.tanggalLahir, r.umur, r.statusPerkawinan, r.jenisKelamin, r.alamat, r.status];
   }
 
   function renderDetailKampung() {
@@ -1492,7 +1491,7 @@
         '</div>';
     } else {
       // kelas per kolom (urutan = DETAIL_KAMPUNG_COLS) untuk perataan & lebar
-      const colCls = ['col-no', 'col-nik', 'col-nama', 'col-tempat', 'col-tgl', 'col-umur', 'col-kawin', 'col-jk', 'col-alamat', 'col-rt', 'col-status'];
+      const colCls = ['col-no', 'col-nik', 'col-nama', 'col-tempat', 'col-tgl', 'col-umur', 'col-kawin', 'col-jk', 'col-alamat', 'col-status'];
       tableHtml = '<div class="table-scroll-hint">↔ Geser tabel ke samping untuk melihat semua kolom</div>' +
         '<div class="table-scroll"><table class="data-table data-table-wide"><thead><tr>' +
         DETAIL_KAMPUNG_COLS.map((h, i) => '<th class="' + colCls[i] + '">' + h + '</th>').join('') +
@@ -1638,7 +1637,7 @@
         return;
       }
 
-      // A4 mendatar: 11 kolom (NO s.d. STATUS) muat & tetap terbaca
+      // A4 mendatar: 10 kolom (NO s.d. STATUS) muat & tetap terbaca
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
@@ -1715,9 +1714,8 @@
           5: { cellWidth: 12, halign: 'center' },                      // UMUR
           6: { cellWidth: 23, halign: 'center' },                      // STATUS PERKAWINAN
           7: { cellWidth: 20, halign: 'center' },                      // JENIS KELAMIN
-          8: { cellWidth: 38, halign: 'left' },                        // ALAMAT
-          9: { cellWidth: 12, halign: 'center' },                      // RT
-          10: { cellWidth: 17, halign: 'center', fontStyle: 'bold' }   // STATUS
+          8: { cellWidth: 40, halign: 'left' },                        // ALAMAT (Kampung + RT)
+          9: { cellWidth: 17, halign: 'center', fontStyle: 'bold' }    // STATUS
         },
         margin: { left: marginL, right: marginR, top: marginT, bottom: marginB },
         didParseCell: function(data) {
