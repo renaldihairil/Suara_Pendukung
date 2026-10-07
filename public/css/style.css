@@ -133,6 +133,10 @@ svg{display:block}
 .btn-download:active:not(:disabled){transform:translateY(0)}
 .btn-download:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
 .btn-download svg{width:17px;height:17px}
+/* Tombol unduh XLSX (hijau, mencolok beda dari PDF merah) */
+.btn-download.btn-xlsx{background:#16a34a;box-shadow:0 8px 18px rgba(22,163,74,.24)}
+.btn-download.btn-xlsx:hover:not(:disabled){background:#15803d}
+.btn-download.btn-xlsx:active:not(:disabled){transform:translateY(0)}
 
 /* ============================================================ */
 /* LOGIN                                                         */
@@ -538,7 +542,7 @@ svg{display:block}
 .vchip.unverified.active{background:#64748b;box-shadow:0 6px 14px rgba(100,116,139,.3)}
 .rt-chip .count,.vchip .count{background:rgba(15,36,71,.08);padding:1px 8px;border-radius:999px;font-size:10.5px;font-weight:700}
 .rt-chip.active .count,.vchip.active .count{background:rgba(255,255,255,.25)}
-.detail-actions{display:flex;gap:10px;margin-bottom:12px}
+.detail-actions{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
 .detail-actions:empty{display:none}
 .detail-sort-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .detail-sort-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:7px;flex:1;min-width:0}
@@ -1464,7 +1468,7 @@ body.sel-mode .toast{bottom:270px}
 .form-section .form-row .form-group:not(:last-child){margin-bottom:16px}
 @media(min-width:640px){.form-section .form-row .form-group:not(:last-child){margin-bottom:0}}
 .btn-tool.btn-bulk-ktp{width:auto;margin:0;flex:none}
-.detail-actions .btn-download{flex:none;padding:11px 20px}
+.detail-actions .btn-download{flex:1 1 160px;padding:11px 16px}
 
 /* ============================================================ */
 /* FAB SCAN DUPLIKAT (kanan bawah, admin)                        */

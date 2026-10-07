@@ -55,6 +55,7 @@
     dashboardCache: null,
     cfgCache: null,
     pdfGenerating: false,
+    xlsxGenerating: false,
     ktpPdfGenerating: false,
     detailWargaId: null,
     verifyId: null,
@@ -1563,6 +1564,9 @@
         (!roleOperate() ? '' :
         '<button class="btn-download" id="btnDownloadPdf" ' + (filtered.length === 0 ? 'disabled' : '') + ' type="button">' +
           ICONS.download + ' Download PDF (A4)' +
+        '</button>' +
+        '<button class="btn-download btn-xlsx" id="btnDownloadXlsx" ' + (filtered.length === 0 ? 'disabled' : '') + ' type="button" title="Unduh spreadsheet; jika Semua RT, dibuat 1 sheet per RT">' +
+          ICONS.download + ' Download XLSX' +
         '</button>') +
       '</div>' +
 
@@ -1623,6 +1627,14 @@
     if (btnDl) {
       btnDl.addEventListener('click', () => {
         downloadPdfDetail(kampung, state.detailFilterRT, state.detailFilterVerif, filtered);
+      });
+    }
+
+    // Bind Download XLSX
+    const btnDlX = $('btnDownloadXlsx');
+    if (btnDlX) {
+      btnDlX.addEventListener('click', () => {
+        downloadXlsxDetail(kampung, state.detailFilterRT, state.detailFilterVerif, filtered);
       });
     }
   }
@@ -1761,6 +1773,128 @@
     state.pdfGenerating = false;
     const btn = $('btnDownloadPdf');
     if (btn) { btn.disabled = false; btn.innerHTML = ICONS.download + ' Download PDF (A4)'; }
+  }
+
+  // ============================================================ //
+  // EXPORT XLSX — filter & urutan sama dengan PDF.               //
+  //  • Filter RT tertentu → 1 sheet berisi RT tersebut.          //
+  //  • Filter "Semua RT"  → 1 sheet per RT (data dikelompokkan   //
+  //    per RT, BUKAN satu sheet berisi semua data).             //
+  //  • Kolom = kolom PDF (tabel layar KECUALI STATUS).           //
+  // ============================================================ //
+  function downloadXlsxDetail(kampung, rtFilter, verifFilter, dataList) {
+    if (state.xlsxGenerating) return;
+    state.xlsxGenerating = true;
+    const btn = $('btnDownloadXlsx');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Membuat XLSX...';
+    }
+
+    try {
+      const W = window.XlsxWriter;
+      if (!W) {
+        toast('Library XLSX belum siap. Coba lagi sebentar.', 'error');
+        resetXlsxButton();
+        return;
+      }
+
+      const COL_STATUS = DETAIL_KAMPUNG_COLS.indexOf('STATUS');
+      const cols = DETAIL_KAMPUNG_COLS.filter((h, i) => i !== COL_STATUS);
+      const nCol = cols.length;
+      const lastColLetter = String.fromCharCode(65 + nCol - 1);   // kolom terakhir: 'I'
+      const now = new Date();
+      const statusLbl = verifFilter === 'true' ? 'PASTI' : (verifFilter === 'false' ? 'BELUM PASTI' : 'SEMUA');
+
+      // Kelompokkan per RT
+      const groups = [];
+      if (rtFilter) {
+        groups.push({ rt: normRT(rtFilter), rows: dataList.slice() });
+      } else {
+        const byRT = {};
+        RT_LIST.forEach(rt => { byRT[rt] = []; });
+        dataList.forEach(p => {
+          const rt = normRT(p.rt);
+          if (!byRT[rt]) byRT[rt] = [];
+          byRT[rt].push(p);
+        });
+        Object.keys(byRT).forEach(rt => { if (byRT[rt].length) groups.push({ rt, rows: byRT[rt] }); });
+        // Urutan sheet mengikuti urutan RT resmi, lalu RT lain (bila ada)
+        groups.sort((a, b) => {
+          const ia = RT_LIST.indexOf(a.rt), ib = RT_LIST.indexOf(b.rt);
+          const xa = ia === -1 ? 999 : ia, xb = ib === -1 ? 999 : ib;
+          return xa !== xb ? xa - xb : a.rt.localeCompare(b.rt);
+        });
+      }
+
+      const book = {
+        title: 'Data KTP Dukungan - Kp. ' + kampung,
+        creator: 'Suara Pendukung',
+        sheets: []
+      };
+
+      groups.forEach(g => {
+        const rtLbl = g.rt === RT_UMUM ? 'UMUM' : ('RT ' + g.rt);
+        const cells = [
+          // Baris 1-3: judul (digabung menyilang seluruh kolom)
+          [{ v: 'DATA KTP DUKUNGAN UNTUK PAK MUHAIMIN (PAK EMEN)', bold: true, sz: 13, color: '0D6E3F', align: 'center' }],
+          [{ v: 'PADA PILKADES SERUNI MUMBUL 2026  |  Kp. ' + kampung + ' ' + rtLbl + '  |  STATUS: ' + statusLbl, bold: true, sz: 11, color: '0F172A', align: 'center' }],
+          [{ v: 'Total: ' + g.rows.length + ' pendukung  |  Dicetak: ' + formatTanggalIndo(now), sz: 9, color: '475569', align: 'center' }],
+          [],   // baris kosong (pemisah)
+          // Baris 5: judul kolom
+          cols.map(h => ({ v: h, bold: true, sz: 10, color: 'FFFFFF', fill: '0D6E3F', align: 'center', wrap: true, border: true }))
+        ];
+        // Baris data
+        g.rows.forEach((p, idx) => {
+          const arr = detailKampungRowArray(detailKampungRow(p, idx)).filter((v, i) => i !== COL_STATUS);
+          const center = [0, 4, 5, 6, 7];                 // NO, TGL LAHIR, UMUR, KAWIN, JK
+          cells.push(arr.map((v, c) => {
+            const isNum = (c === 0) || (c === 5 && /^\d+$/.test(v));   // NO & UMUR sebagai angka
+            return {
+              v: isNum ? Number(v) : v,
+              sz: 10, color: '0F172A',
+              align: center.indexOf(c) !== -1 ? 'center' : 'left',
+              border: true,
+              fill: (idx % 2 === 1) ? 'F0FDF4' : null
+            };
+          }));
+        });
+
+        book.sheets.push({
+          name: (g.rt === RT_UMUM ? 'UMUM' : 'RT ' + g.rt).replace(/[\[\]:*?/\\]/g, '-').slice(0, 31),
+          colWidths: [5, 20, 30, 17, 14, 7, 18, 14, 28],
+          rowHeights: { 0: 20, 1: 17, 2: 14, 3: 8, 4: 32 },
+          merges: [
+            'A1:' + lastColLetter + '1',
+            'A2:' + lastColLetter + '2',
+            'A3:' + lastColLetter + '3'
+          ],
+          cells: cells
+        });
+      });
+
+      const statusSuffix = verifFilter === 'true' ? '_PASTI' : (verifFilter === 'false' ? '_BELUM' : '_SEMUA');
+      const rtSuffix = rtFilter ? ('_' + (rtFilter === RT_UMUM ? 'UMUM' : ('RT_' + normRT(rtFilter)))) : '_SemuaRT';
+      const sortSuffix = state.detailSortAZ === 'desc' ? '_ZA' : '_AZ';
+      const namaFile = 'Data_KTP_' + slugify(kampung) + rtSuffix + statusSuffix + sortSuffix + '_' + formatTanggalFile(now) + '.xlsx';
+      W.save(book, namaFile);
+      toast('✅ XLSX berhasil di-download', 'success');
+      logDownload('XLSX_KAMPUNG', 'XLSX ' + kampung + ' — ' +
+        (rtFilter ? (rtFilter === RT_UMUM ? 'UMUM' : 'RT ' + normRT(rtFilter)) : 'semua RT (' + groups.length + ' sheet, per RT)') +
+        ' — ' + (verifFilter === 'true' ? 'PASTI' : verifFilter === 'false' ? 'BELUM PASTI' : 'semua status') +
+        ' (' + dataList.length + ' data)');
+    } catch (e) {
+      console.error('XLSX Error:', e);
+      toast('Gagal buat XLSX: ' + e.message, 'error');
+    } finally {
+      resetXlsxButton();
+    }
+  }
+
+  function resetXlsxButton() {
+    state.xlsxGenerating = false;
+    const btn = $('btnDownloadXlsx');
+    if (btn) { btn.disabled = false; btn.innerHTML = ICONS.download + ' Download XLSX'; }
   }
 
   function slugify(s) {
