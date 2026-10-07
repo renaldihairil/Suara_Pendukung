@@ -1637,7 +1637,7 @@
         return;
       }
 
-      // A4 mendatar: 10 kolom (NO s.d. STATUS) muat & tetap terbaca
+      // A4 mendatar: 9 kolom (NO s.d. ALAMAT) muat & tetap terbaca
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
@@ -1678,13 +1678,15 @@
       doc.text('Total: ' + dataList.length + ' pendukung  |  Dicetak: ' + formatTanggalIndo(new Date()), marginL, y);
       y += 5;
 
-      const bodyRows = dataList.map((p, idx) => detailKampungRowArray(detailKampungRow(p, idx)));
-      const COL_STATUS = DETAIL_KAMPUNG_COLS.length - 1;
+      // PDF memakai kolom yang sama dengan tabel di layar, KECUALI kolom STATUS (suara PASTI/BELUM tidak ikut dicetak)
+      const COL_STATUS = DETAIL_KAMPUNG_COLS.indexOf('STATUS');
+      const pdfCols = DETAIL_KAMPUNG_COLS.filter((h, i) => i !== COL_STATUS);
+      const bodyRows = dataList.map((p, idx) => detailKampungRowArray(detailKampungRow(p, idx)).filter((v, i) => i !== COL_STATUS));
       const TOTAL_PAGES = '{total}';
 
       doc.autoTable({
         startY: y,
-        head: [DETAIL_KAMPUNG_COLS],
+        head: [pdfCols],
         body: bodyRows,
         theme: 'grid',
         headStyles: {
@@ -1714,22 +1716,9 @@
           5: { cellWidth: 12, halign: 'center' },                      // UMUR
           6: { cellWidth: 23, halign: 'center' },                      // STATUS PERKAWINAN
           7: { cellWidth: 20, halign: 'center' },                      // JENIS KELAMIN
-          8: { cellWidth: 40, halign: 'left' },                        // ALAMAT (Kampung + RT)
-          9: { cellWidth: 17, halign: 'center', fontStyle: 'bold' }    // STATUS
+          8: { cellWidth: 42, halign: 'left' }                         // ALAMAT (Kampung + RT)
         },
         margin: { left: marginL, right: marginR, top: marginT, bottom: marginB },
-        didParseCell: function(data) {
-          if (data.section === 'body' && data.column.index === COL_STATUS) {
-            const statusVal = String(data.cell.raw || '').toUpperCase();
-            if (statusVal === 'PASTI') {
-              data.cell.styles.textColor = [5, 150, 105];
-              data.cell.styles.fillColor = [209, 250, 229];
-            } else if (statusVal === 'BELUM') {
-              data.cell.styles.textColor = [100, 116, 139];
-              data.cell.styles.fillColor = [241, 245, 249];
-            }
-          }
-        },
         didDrawPage: function(data) {
           const pageNum = doc.internal.getCurrentPageInfo().pageNumber;
           doc.setFont('helvetica', 'normal');
