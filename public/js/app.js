@@ -3178,11 +3178,14 @@
     const newIds = {};
 
     let html =
+      '<div class="table-scroll-hint" id="prowHint">↔ Geser tabel ke samping untuk melihat semua kolom</div>' +
       '<div class="prow-wrap">' +
       '<div class="prow-head" aria-hidden="true">' +
-        '<span class="pc-no">No</span><span class="pc-name">Nama Lengkap</span><span class="pc-nik">NIK</span>' +
-        '<span class="pc-kampung">Kampung</span><span class="pc-rt">RT</span><span class="pc-jk">Jenis Kelamin</span>' +
-        '<span class="pc-status">Status</span>' + (canOperate() ? '<span class="pc-act">Aksi</span>' : '<span class="pc-act">Detail</span>') +
+        '<span class="pc-no">NO</span><span class="pc-nik">NIK</span><span class="pc-name">NAMA</span>' +
+        '<span class="pc-tempat">TEMPAT LAHIR</span><span class="pc-tgl">TANGGAL LAHIR</span><span class="pc-umur">UMUR</span>' +
+        '<span class="pc-kawin">STATUS PERKAWINAN</span><span class="pc-jk">JENIS KELAMIN</span>' +
+        '<span class="pc-alamat">ALAMAT</span><span class="pc-status">STATUS</span>' +
+        (canOperate() ? '<span class="pc-act">AKSI</span>' : '<span class="pc-act">DETAIL</span>') +
       '</div>' +
       '<div class="prow-list' + (selOn ? ' select-mode' : '') + '">';
     pageItems.forEach((p, i) => {
@@ -3213,6 +3216,7 @@
         '<div class="' + rowClass + '" data-open-detail="' + id + '">' +
           (selOn ? '<div class="sel-check" aria-hidden="true">' + ICONS.check + '</div>' : '') +
           '<div class="pc-no">' + (startIdx + i + 1) + '</div>' +
+          '<div class="pc-nik">' + esc(p.nik) + '</div>' +
           '<div class="pc-name">' +
             '<div class="person-avatar' + (isP ? ' p' : '') + '">' + esc(initials) +
               (isVerified ? '<div class="verified-mark">' + ICONS.check + '</div>' : '') +
@@ -3222,10 +3226,12 @@
               '<div class="pn-sub"><span class="pn-nik">' + esc(p.nik) + '</span><span class="pn-loc">' + esc(p.kampung) + ' • ' + rtLabel(p.rt) + '</span></div>' +
             '</div>' +
           '</div>' +
-          '<div class="pc-nik">' + esc(p.nik) + '</div>' +
-          '<div class="pc-kampung">' + esc(p.kampung) + '</div>' +
-          '<div class="pc-rt">' + rtLabel(p.rt) + '</div>' +
+          '<div class="pc-tempat">' + esc((p.tempatLahir || '').trim() || '-') + '</div>' +
+          '<div class="pc-tgl">' + esc(formatTglTabel(p.tanggalLahir)) + '</div>' +
+          '<div class="pc-umur">' + (p.usia ? esc(String(p.usia)) : '-') + '</div>' +
+          '<div class="pc-kawin">' + esc((p.statusPerkawinan || '').trim() || '-') + '</div>' +
           '<div class="pc-jk"><span class="person-tag' + (isP ? ' p' : '') + '">' + esc(p.jenisKelamin) + '</span></div>' +
+          '<div class="pc-alamat">' + esc(p.kampung ? 'Kp. ' + p.kampung + ' ' + rtLabel(p.rt) : rtLabel(p.rt)) + '</div>' +
           '<div class="pc-status">' +
             '<span class="person-verify-tag ' + (isVerified ? 'verified' : 'unverified') + '">' +
               (isVerified ? ICONS.shield + ' Pasti' : ICONS.clock + ' Belum') +
@@ -3244,6 +3250,14 @@
     state.prevIds = newIds;
     bindGridEvents(wrap);
     setupLazyImages(wrap);
+
+    // Petunjuk "geser" bila tabel lebar; hilang setelah tabel digeser
+    const prowHint = $('prowHint');
+    const pwrap = wrap.querySelector('.prow-wrap');
+    if (prowHint && pwrap) {
+      prowHint.classList.toggle('show', pwrap.scrollWidth > pwrap.clientWidth + 4);
+      pwrap.addEventListener('scroll', () => prowHint.classList.remove('show'), { once: true, passive: true });
+    }
 
     if (pag) renderPagination(pag, totalFiltered, totalPages);
     renderSelBar();
