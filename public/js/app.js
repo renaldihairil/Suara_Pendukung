@@ -30,7 +30,7 @@
     detailFilterVerif: '',
     detailSortAZ: 'asc',   // ⭐ NEW: 'asc' | 'desc' | 'default'
     detailLoading: false,
-    filter: { q: '', kampung: '', rt: '', verified: '', dicetak: '' },
+    filter: { q: '', kampung: '', rt: '', verified: '', dicetak: '', sortAz: 'default' },
     currentPage: 1,
     fotoBase64: null,
     fotoMime: null,
@@ -3373,6 +3373,12 @@
     else if (state.filter.verified === 'false') filtered = filtered.filter(x => x.verified !== true);
     if (state.filter.dicetak === 'true') filtered = filtered.filter(x => x.dicetak === true);
     else if (state.filter.dicetak === 'false') filtered = filtered.filter(x => x.dicetak !== true);
+    // Urutkan nama A–Z / Z–A bila dipilih (default: urutan asli)
+    if (state.filter.sortAz === 'asc') {
+      filtered = filtered.slice().sort((a, b) => (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' }));
+    } else if (state.filter.sortAz === 'desc') {
+      filtered = filtered.slice().sort((a, b) => (b.nama || '').localeCompare(a.nama || '', 'id', { sensitivity: 'base' }));
+    }
     return filtered;
   }
 
@@ -3421,7 +3427,20 @@
     const prevIds = animate ? state.prevIds : {};
     const newIds = {};
 
+    // Tombol urut nama (sama seperti Detail Kampung) — diletakkan pas di atas tabel
+    const sortIsAsc = state.filter.sortAz !== 'desc';
+    const sortBtnHTML =
+      '<div class="detail-sort-bar">' +
+        '<div class="detail-sort-label">' + ICONS.sortAZ + ' Urutkan Nama</div>' +
+        '<div class="detail-sort-buttons">' +
+          '<button class="sort-btn ' + (state.filter.sortAz !== 'default' ? 'active' : '') + '" id="btnSortNamaData" type="button" title="Urutkan berdasarkan nama">' +
+            (sortIsAsc ? ICONS.sortAZ : ICONS.sortZA) + ' <span>' + (sortIsAsc ? 'A - Z' : 'Z - A') + '</span>' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+
     let html =
+      sortBtnHTML +
       '<div class="table-scroll-hint" id="prowHint">↔ Geser tabel ke samping untuk melihat semua kolom</div>' +
       '<div class="prow-wrap">' +
       '<div class="prow-head" aria-hidden="true">' +
@@ -3478,6 +3497,16 @@
     state.prevIds = newIds;
     bindGridEvents(wrap);
     setupLazyImages(wrap);
+
+    // Tombol urut nama: toggle A–Z <-> Z–A
+    const btnSortNama = $('btnSortNamaData');
+    if (btnSortNama) {
+      btnSortNama.addEventListener('click', () => {
+        state.filter.sortAz = state.filter.sortAz === 'asc' ? 'desc' : 'asc';
+        state.currentPage = 1;
+        renderFilteredGrid();
+      });
+    }
 
     // Petunjuk "geser" bila tabel lebar; hilang setelah tabel digeser
     let prowHint = $('prowHint');
