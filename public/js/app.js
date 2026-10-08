@@ -56,6 +56,8 @@
     cfgCache: null,
     pdfGenerating: false,
     xlsxGenerating: false,
+    massalPdfGenerating: false,
+    massalXlsxGenerating: false,
     ktpPdfGenerating: false,
     detailWargaId: null,
     verifyId: null,
@@ -1899,6 +1901,230 @@
     if (btn) { btn.disabled = false; btn.innerHTML = ICONS.download + ' Download XLSX'; }
   }
 
+  function resetMassalPdfButton() {
+    state.massalPdfGenerating = false;
+    const btn = $('btnMassalPdf');
+    if (btn) { btn.disabled = false; btn.innerHTML = ICONS.download + ' Download PDF'; }
+  }
+
+  function resetMassalXlsxButton() {
+    state.massalXlsxGenerating = false;
+    const btn = $('btnMassalXlsx');
+    if (btn) { btn.disabled = false; btn.innerHTML = ICONS.download + ' Download XLSX'; }
+  }
+
+  /** Kelompokkan semua data → [ { kampung, subsets: [{ rt, rows }] } ] menurut urutan KAMPUNG_LIST & RT_LIST (nama diurutkan A–Z). */
+  function _kelompokMassal() {
+    const data = state.allData || [];
+    const byKampung = {};
+    data.forEach(p => {
+      const k = String(p.kampung || '').trim();
+      if (!byKampung[k]) { byKampung[k] = []; }
+      byKampung[k].push(p);
+    });
+    const kampungs = Object.keys(byKampung).sort((a, b) => {
+      const ia = KAMPUNG_LIST.indexOf(a), ib = KAMPUNG_LIST.indexOf(b);
+      const xa = ia === -1 ? 999 : ia, xb = ib === -1 ? 999 : ib;
+      return xa !== xb ? xa - xb : a.localeCompare(b);
+    });
+    return kampungs.map(k => {
+      const byRt = {};
+      RT_LIST.forEach(rt => { byRt[rt] = []; });
+      byKampung[k].forEach(p => {
+        const rt = normRT(p.rt);
+        if (!byRt[rt]) { byRt[rt] = []; }
+        byRt[rt].push(p);
+      });
+      const subsets = [];
+      Object.keys(byRt).forEach(rt => {
+        if (!byRt[rt].length) { return; }
+        byRt[rt].sort((a, b) => (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' }));
+        subsets.push({ rt, rows: byRt[rt] });
+      });
+      subsets.sort((a, b) => {
+        const ia = RT_LIST.indexOf(a.rt), ib = RT_LIST.indexOf(b.rt);
+        const xa = ia === -1 ? 999 : ia, xb = ib === -1 ? 999 : ib;
+        return xa !== xb ? xa - xb : a.rt.localeCompare(b.rt);
+      });
+      return { kampung: k, subsets };
+    });
+  }
+
+  // ============================================================ //
+  // DOWNLOAD MASSAL — SEMUA KAMPUNG (tombol di halaman Data)     //
+  // ============================================================ //
+  window.__downloadMassalPdf = function() {
+    if (state.massalPdfGenerating) { return; }
+    if (!state.allData || !state.allData.length) { toast('Belum ada data untuk diunduh', 'warn'); return; }
+    state.massalPdfGenerating = true;
+    const btn = $('btnMassalPdf');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Membuat PDF...';
+    }
+    try {
+      const { jsPDF } = window.jspdf;
+      if (!jsPDF) { toast('Library PDF belum siap. Coba lagi sebentar.', 'error'); resetMassalPdfButton(); return; }
+
+      const kampungGroups = _kelompokMassal();
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const marginL = 10, marginR = 10, marginT = 12, marginB = 14;
+      const TOTAL_PAGES = '{total}';
+      const footerPages = {};
+      let y = marginT;
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(13, 110, 63);
+      doc.text('DATA KTP DUKUNGAN UNTUK PAK MUHAIMIN (PAK EMEN)', pageW / 2, y, { align: 'center' }); y += 7;
+      doc.setFontSize(11); doc.setTextColor(15, 23, 42);
+      doc.text('PADA PILKADES SERUNI MUMBUL 2026  |  SEMUA KAMPUNG  |  STATUS: SEMUA', pageW / 2, y, { align: 'center' }); y += 4;
+      doc.setDrawColor(13, 110, 63); doc.setLineWidth(0.5);
+      doc.line(marginL, y, pageW - marginR, y); y += 6;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(71, 85, 105);
+      doc.text('Total: ' + state.allData.length + ' pendukung  |  Dicetak: ' + formatTanggalIndo(new Date()), marginL, y); y += 6;
+
+      const COL_STATUS = DETAIL_KAMPUNG_COLS.indexOf('STATUS');
+      const pdfCols = DETAIL_KAMPUNG_COLS.filter((h, i) => i !== COL_STATUS);
+
+      kampungGroups.forEach((g, gi) => {
+        if (gi > 0 && y > pageH - marginB - 24) { doc.addPage(); y = marginT; }
+        const jumlahKampung = g.subsets.reduce((s, x) => s + x.rows.length, 0);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(13, 110, 63);
+        doc.text('Kp. ' + g.kampung, marginL, y);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(71, 85, 105);
+        doc.text(' (' + jumlahKampung + ' pendukung)', marginL + doc.getTextWidth('Kp. ' + g.kampung + ' ') + 1, y);
+        y += 3.5;
+        doc.setLineWidth(0.3); doc.line(marginL, y, pageW - marginR, y); y += 5;
+
+        g.subsets.forEach(s => {
+          if (y > pageH - marginB - 30) { doc.addPage(); y = marginT; }
+          const rtLbl = s.rt === RT_UMUM ? 'UMUM' : ('RT ' + s.rt);
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(30, 41, 59);
+          doc.text(rtLbl + '  (' + s.rows.length + ')', marginL, y); y += 3.5;
+
+          const bodyRows = s.rows.map((p, idx) => detailKampungRowArray(detailKampungRow(p, idx)).filter((v, i) => i !== COL_STATUS));
+          doc.autoTable({
+            startY: y, head: [pdfCols], body: bodyRows, theme: 'grid',
+            headStyles: { fillColor: [13, 110, 63], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5, halign: 'center', valign: 'middle', cellPadding: 1.8 },
+            bodyStyles: { fontSize: 8, textColor: [15, 23, 42], cellPadding: 1.8, valign: 'middle', overflow: 'linebreak' },
+            alternateRowStyles: { fillColor: [240, 253, 244] },
+            columnStyles: {
+              0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
+              1: { cellWidth: 33, halign: 'left', font: 'courier' },
+              2: { cellWidth: 'auto', halign: 'left' },
+              3: { cellWidth: 26, halign: 'left' },
+              4: { cellWidth: 21, halign: 'center' },
+              5: { cellWidth: 12, halign: 'center' },
+              6: { cellWidth: 23, halign: 'center' },
+              7: { cellWidth: 20, halign: 'center' },
+              8: { cellWidth: 42, halign: 'left' }
+            },
+            margin: { left: marginL, right: marginR, top: marginT, bottom: marginB },
+            didDrawPage: function(data) {
+              const pageNum = doc.internal.getCurrentPageInfo().pageNumber;
+              if (footerPages[pageNum]) { return; }   // setiap halaman hanya sekali footernya
+              footerPages[pageNum] = true;
+              doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(148, 163, 184);
+              doc.text('Halaman ' + pageNum + ' dari ' + TOTAL_PAGES, pageW / 2, pageH - 8, { align: 'center' });
+              doc.text('Data Pendukung Pak Emen - Pilkades 2026', marginL, pageH - 8);
+            }
+          });
+          y = doc.lastAutoTable.finalY + 5;
+        });
+        y += 2;
+      });
+
+      if (typeof doc.putTotalPages === 'function') { doc.putTotalPages(TOTAL_PAGES); }
+      const namaFile = 'Data_KTP_SEMUA_KAMPUNG_AZ_' + formatTanggalFile(new Date()) + '.pdf';
+      doc.save(namaFile);
+      toast('✅ PDF berhasil di-download', 'success');
+      logDownload('PDF_MASSAL', 'PDF A4 SEMUA KAMPUNG (' + state.allData.length + ' data)');
+    } catch (e) {
+      console.error('PDF MASSAL Error:', e);
+      toast('Gagal buat PDF: ' + e.message, 'error');
+    } finally {
+      resetMassalPdfButton();
+    }
+  };
+
+  window.__downloadMassalXlsx = function() {
+    if (state.massalXlsxGenerating) { return; }
+    if (!state.allData || !state.allData.length) { toast('Belum ada data untuk diunduh', 'warn'); return; }
+    state.massalXlsxGenerating = true;
+    const btn = $('btnMassalXlsx');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0;border-color:rgba(255,255,255,.4);border-top-color:#fff"></div> Membuat XLSX...';
+    }
+    try {
+      const W = window.XlsxWriter;
+      if (!W) { toast('Library XLSX belum siap. Coba lagi sebentar.', 'error'); resetMassalXlsxButton(); return; }
+
+      const kampungGroups = _kelompokMassal();
+      const COL_STATUS = DETAIL_KAMPUNG_COLS.indexOf('STATUS');
+      const cols = DETAIL_KAMPUNG_COLS.filter((h, i) => i !== COL_STATUS);
+      const nCol = cols.length;
+      const lastColLetter = String.fromCharCode(65 + nCol - 1);
+      const now = new Date();
+
+      const book = { title: 'Data KTP Dukungan — Semua Kampung', creator: 'Suara Pendukung', sheets: [] };
+
+      kampungGroups.forEach(g => {
+        const jumlah = g.subsets.reduce((s, x) => s + x.rows.length, 0);
+        const cells = [];
+        const merges = [];
+        const rowHeights = {};
+        let rIndex = 0;
+
+        // Baris 1-3: judul (digabung menyilang)
+        cells.push([{ v: 'DATA KTP DUKUNGAN UNTUK PAK MUHAIMIN (PAK EMEN)', bold: true, sz: 13, color: '0D6E3F', align: 'center' }]);
+        merges.push('A' + (rIndex + 1) + ':' + lastColLetter + (rIndex + 1)); rowHeights[rIndex] = 20; rIndex++;
+        cells.push([{ v: 'PADA PILKADES SERUNI MUMBUL 2026  |  Kp. ' + g.kampung + '  |  SEMUA KAMPUNG', bold: true, sz: 11, color: '0F172A', align: 'center' }]);
+        merges.push('A' + (rIndex + 1) + ':' + lastColLetter + (rIndex + 1)); rowHeights[rIndex] = 17; rIndex++;
+        cells.push([{ v: 'Total: ' + jumlah + ' pendukung  |  Dicetak: ' + formatTanggalIndo(now), sz: 9, color: '475569', align: 'center' }]);
+        merges.push('A' + (rIndex + 1) + ':' + lastColLetter + (rIndex + 1)); rowHeights[rIndex] = 14; rIndex++;
+        cells.push([]); rowHeights[rIndex] = 8; rIndex++;
+
+        g.subsets.forEach((s, idxSub) => {
+          if (idxSub > 0) { cells.push([]); rowHeights[rIndex] = 10; rIndex++; }
+          const rtLbl = s.rt === RT_UMUM ? 'UMUM' : ('RT ' + s.rt);
+          cells.push([{ v: rtLbl + '  (' + s.rows.length + ' pendukung)', bold: true, sz: 11, color: '065F46', fill: 'D1FAE5', align: 'left', border: true, wrap: false }]);
+          merges.push('A' + (rIndex + 1) + ':' + lastColLetter + (rIndex + 1)); rowHeights[rIndex] = 18; rIndex++;
+          cells.push(cols.map(h => ({ v: h, bold: true, sz: 10, color: 'FFFFFF', fill: '0D6E3F', align: 'center', wrap: true, border: true })));
+          rowHeights[rIndex] = 32; rIndex++;
+          s.rows.forEach((p, idx) => {
+            const arr = detailKampungRowArray(detailKampungRow(p, idx)).filter((v, i) => i !== COL_STATUS);
+            const center = [0, 4, 5, 6, 7];
+            cells.push(arr.map((v, c) => {
+              const isNum = (c === 0) || (c === 5 && /^\d+$/.test(v));
+              return { v: isNum ? Number(v) : v, sz: 10, color: '0F172A', align: center.indexOf(c) !== -1 ? 'center' : 'left', border: true, fill: (idx % 2 === 1) ? 'F0FDF4' : null };
+            }));
+            rIndex++;
+          });
+        });
+
+        book.sheets.push({
+          name: String(g.kampung || 'Kampung').replace(/[\[\]:*?/\\]/g, '-').slice(0, 31),
+          colWidths: [5, 20, 30, 17, 14, 7, 18, 14, 28],
+          rowHeights: rowHeights,
+          merges: merges,
+          cells: cells
+        });
+      });
+
+      const namaFile = 'Data_KTP_SEMUA_KAMPUNG_AZ_' + formatTanggalFile(now) + '.xlsx';
+      W.save(book, namaFile);
+      toast('✅ XLSX berhasil di-download', 'success');
+      logDownload('XLSX_MASSAL', 'XLSX SEMUA KAMPUNG (' + kampungGroups.length + ' sheet) (' + state.allData.length + ' data)');
+    } catch (e) {
+      console.error('XLSX MASSAL Error:', e);
+      toast('Gagal buat XLSX: ' + e.message, 'error');
+    } finally {
+      resetMassalXlsxButton();
+    }
+  };
+
   function slugify(s) {
     return String(s || '').trim().replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
   }
@@ -3015,6 +3241,8 @@
       '<button class="btn-tool btn-sel-mode' + (state.sel.on ? ' active' : '') + '" id="btnSelMode" type="button">' +
         (state.sel.on ? ICONS.close + ' Keluar Ceklist' : ICONS.check + ' Ceklist Cetak') +
       '</button>' +
+      '<button class="btn-tool btn-dl-xlsx" id="btnMassalXlsx" type="button" title="Unduh semua data: 1 sheet per kampung, tabel per RT di dalamnya">' + ICONS.download + ' Download XLSX</button>' +
+      '<button class="btn-tool btn-dl-pdf" id="btnMassalPdf" type="button" title="Unduh semua data seluruh kampung">' + ICONS.download + ' Download PDF</button>' +
       '<button class="btn-tool btn-bulk-ktp" id="btnBulkKtp" type="button">' + ICONS.download + ' Download KTP</button>' +
       '<button class="btn-tool btn-add" id="btnAddFromData" type="button">' + ICONS.plus + ' Tambah Pendukung</button>';
 
@@ -3077,6 +3305,8 @@
         if (!state.allData) { toast('Data masih dimuat, tunggu sebentar', 'warn'); return; }
         window.__openBulkKtp();
       });
+      $('btnMassalPdf').addEventListener('click', () => window.__downloadMassalPdf());
+      $('btnMassalXlsx').addEventListener('click', () => window.__downloadMassalXlsx());
 
       $('btnSelMode').addEventListener('click', () => {
         if (!state.allData) { toast('Data masih dimuat, tunggu sebentar', 'warn'); return; }
