@@ -1576,8 +1576,10 @@
     const tScroll = c.querySelector('.table-scroll');
     const tHint = c.querySelector('.table-scroll-hint');
     if (tScroll && tHint) {
-      tHint.classList.toggle('show', tScroll.scrollWidth > tScroll.clientWidth + 4);
       tScroll.addEventListener('scroll', () => tHint.classList.remove('show'), { once: true, passive: true });
+      setTimeout(() => {
+        tHint.classList.toggle('show', tScroll.scrollWidth > tScroll.clientWidth + 4);
+      }, 60);
     }
 
     // Bind back
@@ -3184,8 +3186,7 @@
         '<span class="pc-no">NO</span><span class="pc-nik">NIK</span><span class="pc-name">NAMA</span>' +
         '<span class="pc-tempat">TEMPAT LAHIR</span><span class="pc-tgl">TANGGAL LAHIR</span><span class="pc-umur">UMUR</span>' +
         '<span class="pc-kawin">STATUS PERKAWINAN</span><span class="pc-jk">JENIS KELAMIN</span>' +
-        '<span class="pc-alamat">ALAMAT</span><span class="pc-status">STATUS</span>' +
-        (canOperate() ? '<span class="pc-act">AKSI</span>' : '<span class="pc-act">DETAIL</span>') +
+        '<span class="pc-alamat">ALAMAT</span><span class="pc-ttd">TTD</span>' +
       '</div>' +
       '<div class="prow-list' + (selOn ? ' select-mode' : '') + '">';
     pageItems.forEach((p, i) => {
@@ -3196,21 +3197,9 @@
       const isP = p.jenisKelamin === 'Perempuan';
       const isVerified = p.verified === true;
       const isPrinted = p.dicetak === true;
-      const hasFotoKTP = !!(p.fotoKTPId && String(p.fotoKTPId).trim());
       const initials = initialsOf(p.nama);
       const rowClass = 'prow ' + (isVerified ? 'verified-card' : 'unverified-card') + (isNew ? ' is-new' : '') + (isSel ? ' selected' : '');
       const id = esc(p.id);
-
-      const actions = canOperate() ?
-        '<button class="ra ra-verify' + (isVerified ? ' on' : '') + '" data-action="' + (isVerified ? 'unverify' : 'verify') + '" data-id="' + id + '" title="' + (isVerified ? 'Batalkan verifikasi' : 'Verifikasi (tandai sudah TTD)') + '" type="button">' + (isVerified ? ICONS.clock : ICONS.shield) + '</button>' +
-        '<button class="ra ra-print' + (isPrinted ? ' on' : '') + '" data-action="toggle-print" data-id="' + id + '" title="' + (isPrinted ? 'Tandai belum dicetak' : 'Tandai sudah dicetak') + '" type="button">' + ICONS.printer + '</button>' +
-        '<button class="ra ra-ktp" data-action="download-ktp" data-id="' + id + '" type="button"' + (hasFotoKTP ? ' title="Unduh KTP (A4)"' : ' disabled title="Belum ada foto KTP"') + '>' + ICONS.download + '</button>' +
-        '<button class="ra ra-edit" data-action="edit" data-id="' + id + '" title="Edit data" type="button">' + ICONS.edit + '</button>' +
-        (isAdmin() ?
-        '<button class="ra ra-del" data-action="del" data-id="' + id + '" data-nama="' + esc(p.nama) + '" title="Hapus data" type="button">' + ICONS.trash + '</button>'
-        : '')
-        :
-        '<button class="ra ra-view" data-action="detail" data-id="' + id + '" title="Lihat detail" type="button">' + ICONS.eye + '</button>';
 
       html +=
         '<div class="' + rowClass + '" data-open-detail="' + id + '">' +
@@ -3223,7 +3212,8 @@
             '</div>' +
             '<div class="pn-txt">' +
               '<div class="person-name" title="' + esc(p.nama) + '">' + esc(p.nama) + '</div>' +
-              '<div class="pn-sub"><span class="pn-nik">' + esc(p.nik) + '</span><span class="pn-loc">' + esc(p.kampung) + ' • ' + rtLabel(p.rt) + '</span></div>' +
+              '<div class="pn-sub"><span class="pn-nik">' + esc(p.nik) + '</span><span class="pn-loc">' + esc(p.kampung) + ' • ' + rtLabel(p.rt) + '</span>' +
+              '<span class="pn-status">' + esc(isVerified ? '✅ Pasti' : '⏳ Belum') + ' • ' + esc(isPrinted ? 'Sudah cetak' : 'Belum cetak') + '</span></div>' +
             '</div>' +
           '</div>' +
           '<div class="pc-tempat">' + esc((p.tempatLahir || '').trim() || '-') + '</div>' +
@@ -3232,15 +3222,11 @@
           '<div class="pc-kawin">' + esc((p.statusPerkawinan || '').trim() || '-') + '</div>' +
           '<div class="pc-jk"><span class="person-tag' + (isP ? ' p' : '') + '">' + esc(p.jenisKelamin) + '</span></div>' +
           '<div class="pc-alamat">' + esc(p.kampung ? 'Kp. ' + p.kampung + ' ' + rtLabel(p.rt) : rtLabel(p.rt)) + '</div>' +
-          '<div class="pc-status">' +
-            '<span class="person-verify-tag ' + (isVerified ? 'verified' : 'unverified') + '">' +
-              (isVerified ? ICONS.shield + ' Pasti' : ICONS.clock + ' Belum') +
-            '</span>' +
-            '<span class="person-print-tag ' + (isPrinted ? 'printed' : 'unprinted') + '">' +
-              ICONS.printer + (isPrinted ? ' Dicetak' : ' Belum cetak') +
-            '</span>' +
+          '<div class="pc-ttd">' +
+            (p.fotoTTDId
+              ? '<button class="ttd-btn" data-action="view-ttd" data-id="' + id + '" title="' + esc(p.metodeTTD === 'digital' ? 'Lihat tanda tangan digital' : 'Lihat bukti TTD (fotokopi KTP ber-TTD)') + '" type="button">' + ICONS.ttd + ' ' + esc(p.metodeTTD === 'digital' ? 'Digital' : 'Lihat') + '</button>'
+              : '<span class="ttd-kosong">–</span>') +
           '</div>' +
-          '<div class="pc-act">' + actions + '</div>' +
           '<div class="pc-chev" aria-hidden="true">' + ICONS.next + '</div>' +
         '</div>';
     });
@@ -3252,11 +3238,14 @@
     setupLazyImages(wrap);
 
     // Petunjuk "geser" bila tabel lebar; hilang setelah tabel digeser
-    const prowHint = $('prowHint');
-    const pwrap = wrap.querySelector('.prow-wrap');
+    let prowHint = $('prowHint');
+    let pwrap = wrap.querySelector('.prow-wrap');
     if (prowHint && pwrap) {
-      prowHint.classList.toggle('show', pwrap.scrollWidth > pwrap.clientWidth + 4);
       pwrap.addEventListener('scroll', () => prowHint.classList.remove('show'), { once: true, passive: true });
+      // Ukuran tabel ditentukan setelah tata letak; tunda sedikit agar scrollWidth benar
+      setTimeout(() => {
+        prowHint.classList.toggle('show', pwrap.scrollWidth > pwrap.clientWidth + 4);
+      }, 60);
     }
 
     if (pag) renderPagination(pag, totalFiltered, totalPages);
@@ -3353,6 +3342,7 @@
         const action = btn.getAttribute('data-action');
         const id = btn.getAttribute('data-id');
         if (action === 'detail') { window.__openDetailWarga(id); return; }
+        if (action === 'view-ttd') { window.__viewTtd(id); return; }
         if (!canOperate()) return; // role user: tombol tulis tidak ada & ditolak server
         if (action === 'edit') window.__editData(id);
         else if (action === 'del') { if (isAdmin()) window.__deleteData(id, btn.getAttribute('data-nama')); }
@@ -3542,6 +3532,15 @@
     prefetchById(id);
     renderModalDetailWarga(p);
     $('modalDetailWarga').classList.add('show');
+  };
+
+  // Buka lembar bukti TTD (fotokopi ber-TTD atau TTD digital) di penampil foto
+  window.__viewTtd = function(id) {
+    const p = (state.allData || []).find(x => String(x.id) === String(id));
+    if (!p) { toast('Data tidak ditemukan', 'error'); return; }
+    const url = p.fotoTTD || (p.fotoTTDId ? '/api/photo?id=' + encodeURIComponent(p.fotoTTDId) : '');
+    if (!url) { toast('Bukti TTD belum tersedia', 'error'); return; }
+    window.__showFoto(url);
   };
 
   // Foto KTP/TTD di detail digambar ke canvas (tidak bisa "Download gambar" lewat tekan lama)
