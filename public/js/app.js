@@ -1946,9 +1946,13 @@
         byRt[rt].push(p);
       });
       const subsets = [];
+      let azDesc = state.filter.sortAz === 'desc';
       Object.keys(byRt).forEach(rt => {
         if (!byRt[rt].length) { return; }
-        byRt[rt].sort((a, b) => (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' }));
+        // Urutkan dalam tiap RT mengikuti tombol Urutkan Nama A–Z/Z–A (default: A–Z)
+        byRt[rt].sort((a, b) => azDesc
+          ? (b.nama || '').localeCompare(a.nama || '', 'id', { sensitivity: 'base' })
+          : (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' }));
         subsets.push({ rt, rows: byRt[rt] });
       });
       subsets.sort((a, b) => {
