@@ -1804,9 +1804,9 @@
       }
 
       const COL_STATUS = DETAIL_KAMPUNG_COLS.indexOf('STATUS');
-      const cols = DETAIL_KAMPUNG_COLS.filter((h, i) => i !== COL_STATUS);
+      const cols = DETAIL_KAMPUNG_COLS.filter((h, i) => i !== COL_STATUS).concat(['TTD']);
       const nCol = cols.length;
-      const lastColLetter = String.fromCharCode(65 + nCol - 1);   // kolom terakhir: 'I'
+      const lastColLetter = String.fromCharCode(65 + nCol - 1);   // kolom terakhir: 'J'
       const now = new Date();
       const statusLbl = verifFilter === 'true' ? 'PASTI' : (verifFilter === 'false' ? 'BELUM PASTI' : 'SEMUA');
 
@@ -1851,12 +1851,14 @@
         // Baris data
         g.rows.forEach((p, idx) => {
           const arr = detailKampungRowArray(detailKampungRow(p, idx)).filter((v, i) => i !== COL_STATUS);
+          arr.push(ttdUrlValue(p));                                    // kolom TTD: tautan bukti TTD
           const center = [0, 4, 5, 6, 7];                 // NO, TGL LAHIR, UMUR, KAWIN, JK
           cells.push(arr.map((v, c) => {
             const isNum = (c === 0) || (c === 5 && /^\d+$/.test(v));   // NO & UMUR sebagai angka
+            const isTtd = c === cols.length - 1;                       // kolom TTD terakhir
             return {
               v: isNum ? Number(v) : v,
-              sz: 10, color: '0F172A',
+              sz: 10, color: isTtd ? '1D4ED8' : '0F172A',
               align: center.indexOf(c) !== -1 ? 'center' : 'left',
               border: true,
               fill: (idx % 2 === 1) ? 'F0FDF4' : null
@@ -1866,7 +1868,7 @@
 
         book.sheets.push({
           name: (g.rt === RT_UMUM ? 'UMUM' : 'RT ' + g.rt).replace(/[\[\]:*?/\\]/g, '-').slice(0, 31),
-          colWidths: [5, 20, 30, 17, 14, 7, 18, 14, 28],
+          colWidths: [5, 20, 30, 17, 14, 7, 18, 14, 28, 40],
           rowHeights: { 0: 20, 1: 17, 2: 14, 3: 8, 4: 32 },
           merges: [
             'A1:' + lastColLetter + '1',
@@ -1899,6 +1901,14 @@
     state.xlsxGenerating = false;
     const btn = $('btnDownloadXlsx');
     if (btn) { btn.disabled = false; btn.innerHTML = ICONS.download + ' Download XLSX'; }
+  }
+
+  /** URL bukti TTD untuk isi kolom TTD di XLSX — absolut agar tautan bisa dibuka. Kosong → '-' */
+  function ttdUrlValue(p) {
+    if (!p) return '-';
+    const raw = p.fotoTTD || (p.fotoTTDId ? '/api/photo?id=' + encodeURIComponent(p.fotoTTDId) : '');
+    if (!raw) return '-';
+    return /^https?:\/\//i.test(raw) ? raw : ((window.location.origin || '') + raw);
   }
 
   function resetMassalPdfButton() {
@@ -2063,7 +2073,7 @@
 
       const kampungGroups = _kelompokMassal();
       const COL_STATUS = DETAIL_KAMPUNG_COLS.indexOf('STATUS');
-      const cols = DETAIL_KAMPUNG_COLS.filter((h, i) => i !== COL_STATUS);
+      const cols = DETAIL_KAMPUNG_COLS.filter((h, i) => i !== COL_STATUS).concat(['TTD']);
       const nCol = cols.length;
       const lastColLetter = String.fromCharCode(65 + nCol - 1);
       const now = new Date();
@@ -2095,10 +2105,12 @@
           rowHeights[rIndex] = 32; rIndex++;
           s.rows.forEach((p, idx) => {
             const arr = detailKampungRowArray(detailKampungRow(p, idx)).filter((v, i) => i !== COL_STATUS);
+            arr.push(ttdUrlValue(p));                                    // kolom TTD: tautan bukti TTD
             const center = [0, 4, 5, 6, 7];
             cells.push(arr.map((v, c) => {
               const isNum = (c === 0) || (c === 5 && /^\d+$/.test(v));
-              return { v: isNum ? Number(v) : v, sz: 10, color: '0F172A', align: center.indexOf(c) !== -1 ? 'center' : 'left', border: true, fill: (idx % 2 === 1) ? 'F0FDF4' : null };
+              const isTtd = c === cols.length - 1;                       // kolom TTD terakhir
+              return { v: isNum ? Number(v) : v, sz: 10, color: isTtd ? '1D4ED8' : '0F172A', align: center.indexOf(c) !== -1 ? 'center' : 'left', border: true, fill: (idx % 2 === 1) ? 'F0FDF4' : null };
             }));
             rIndex++;
           });
@@ -2106,7 +2118,7 @@
 
         book.sheets.push({
           name: String(g.kampung || 'Kampung').replace(/[\[\]:*?/\\]/g, '-').slice(0, 31),
-          colWidths: [5, 20, 30, 17, 14, 7, 18, 14, 28],
+          colWidths: [5, 20, 30, 17, 14, 7, 18, 14, 28, 40],
           rowHeights: rowHeights,
           merges: merges,
           cells: cells
