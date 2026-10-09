@@ -854,6 +854,9 @@
 
   function syncData(silent) {
     if (state.isFetching || state.isRevChecking) return;
+    // Jeda setelah gagal: tanpa ini halaman Data mengulang permintaan berat setiap
+    // 4 detik saat server sibuk/kuota habis → makin buruk & tabel tak pernah terisi.
+    if (state._failUntil && Date.now() < state._failUntil) return;
     state.isRevChecking = true;
     if (!silent) setSyncStatus('syncing');
     fetch('/api/rev', { credentials: 'same-origin', cache: 'no-cache' })
@@ -865,8 +868,15 @@
         offTouch(false);
         setSyncStatus('online');
         if (state.rev && r.rev === state.rev && state.allData) return;       // tidak ada perubahan
-        state.isFetching = true;
-        fetchAndReplace(true, null, { fromRemote: !!state.rev });
+        // isFetching dipegang fetchAndReplace (jangan diset di sini, agar guard-nya bekerja)
+        fetchAndReplace(true, ok => {
+          if (ok) { state._failCount = 0; state._failUntil = 0; }
+          else {
+            // Mundur bertahap: 5s → 10s → 20s → 40s → maks 60s
+            state._failCount = Math.min((state._failCount || 0) + 1, 5);
+            state._failUntil = Date.now() + Math.min(5000 * Math.pow(2, state._failCount - 1), 60000);
+          }
+        }, { fromRemote: !!state.rev });
       })
       .catch(() => {
         state.isRevChecking = false;
@@ -879,6 +889,14 @@
 
   // Ambil data terbaru (satu permintaan) lalu perbarui tampilan yang sedang dibuka
   function fetchAndReplace(silent, callback, opts) {
+    // ⭐ JAGA: hanya boleh satu permintaan data berjalan pada satu waktu.
+    // Tanpa ini, renderData() + polling (/api/rev) bisa memanggil bersamaan sehingga
+    // beberapa permintaan berat ke Google Sheets bertumpuk → Hak akses baca habis (429)
+    // → permintaan gagal → status berkedip offline/online → tabel tidak pernah terisi.
+    // Bila ada permintaan yang sedang berjalan, LEWATI diam-diam (JANGAN laporkan
+    // gagal — permintaan yang sedang jalan akan memperbarui halaman saat selesai).
+    if (state.isFetching) return;
+    state.isFetching = true;
     const token = state.pageToken;
     const prevRev = state.rev;
     google.script.run
@@ -898,9 +916,14 @@
         }
         if (typeof callback === 'function') callback(true);
       })
-      .withFailureHandler(() => {
+      .withFailureHandler(e => {
         state.isFetching = false;
-        setSyncStatus('offline');
+        // Jangan tandai "offline" untuk kegagalan di sisi server (mis. kuota Google
+        // Sheets habis): internet masih ada. Cukup beri tahu pengguna & coba lagi.
+        const msg = String((e && e.message) || '');
+        const sisiServer = /429|quota|rate.?limit|HTTP 5\d\d|sibuk|timeout|terlalu lama/i.test(msg);
+        if (!sisiServer) setSyncStatus('offline');
+        else toast('⚠️ Server sedang sibuk, data mungkin belum termuat. Coba beberapa saat lagi.', 'warn');
         if (typeof callback === 'function') callback(false);
       })
       .apiGetBootstrap({ fresh: true });
@@ -3338,9 +3361,73 @@
     }
 
     showGridSkeleton();
-    // silent=true: jangan tampilkan status offline/syncing saat memuat awal,
-    // karena data mungkin sedang dimuat oleh halaman lain (mis. dashboard).
-    fetchAndReplace(true);
+    // ⭐ Jaring pengaman: bila fetchAndReplace di-skip (karena ada permintaan lain
+    // yang sedang berjalan), polling tetap berjalan & eventually mengisi grid.
+    // PENTING: jangan pakai pageToken (bisa berubah karena navigasi cepat) —
+    // cukup cek halaman masih "data" & grid masih ada di DOM.
+    const guard = setInterval(() => {
+      const w = $('dataGridWrap');
+      if (state.page !== 'data' || !w) { clearInterval(guard); return; }
+      // ✅ Data sudah ada & grid masih kosong/skeleton → isi sekarang
+      if (state.allData && (w.querySelector('.skeleton') || (!w.querySelector('.prow') && !w.querySelector('.empty-state')))) {
+        clearInterval(guard);
+        renderFilteredGrid();
+        return;
+      }
+      if (state.allData && !w.querySelector('.skeleton')) { clearInterval(guard); return; }   // sudah ter-render
+      if (!state.isFetching && !state.isRevChecking && !state.allData) clearInterval(guard);
+    }, 400);
+    // Muat data. Jika gagal → tampilkan pesan + tombol coba lagi,
+    // JANGAN biarkan skeleton berputar tanpa akhir (terlihat "loading terus").
+    fetchAndReplace(true, ok => {
+      if (ok) { clearInterval(guard); return; }
+      if (state.page !== 'data') return;
+      // Permintaan mungkin dilewati karena sedang ada yang lain → tunggu, jangan scare user
+      if (state.isFetching || state.allData) return;
+      const wrap = $('dataGridWrap');
+      const info = $('gridInfo');
+      if (info) info.innerHTML = '';
+      if (wrap) {
+        wrap.innerHTML =
+          '<div class="empty-state">' +
+            '<div class="big">📡</div>' +
+            '<h3>Data belum berhasil dimuat</h3>' +
+            '<p>Server mungkin sedang sibuk atau koneksi tidak stabil. Data Anda aman di Google Spreadsheet.</p>' +
+            '<button class="btn btn-primary" id="btnRetryData" type="button" style="margin-top:12px">' +
+              ICONS.refresh + ' Coba Lagi</button>' +
+          '</div>';
+        const rb = $('btnRetryData');
+        if (rb) rb.addEventListener('click', () => {
+          state._failUntil = 0;
+          state._failCount = 0;
+          rb.disabled = true;
+          rb.textContent = 'Memuat…';
+          showGridSkeleton();
+          // Kalau ada permintaan lain yang sedang jalan, tunggu ia selesai
+          // (polling akan mengisi grid) alih-alih memaksa render ulang.
+          if (state.isFetching) {
+            const t = setInterval(() => {
+              if (state.allData) {
+                clearInterval(t);
+                const w = $('dataGridWrap');
+                if (w && !w.querySelector('.skeleton')) renderFilteredGrid();
+              } else if (!state.isFetching) {
+                clearInterval(t);
+                rb.disabled = false;
+                rb.textContent = ICONS.refresh + ' Coba Lagi';
+              }
+            }, 400);
+            return;
+          }
+          fetchAndReplace(true, ok2 => {
+            if (ok2) return;
+            rb.disabled = false;
+            rb.innerHTML = ICONS.refresh + ' Coba Lagi';
+            if (state.allData && $('dataGridWrap')) renderFilteredGrid();
+          });
+        });
+      }
+    });
   }
 
   function showGridSkeleton() {
