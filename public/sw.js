@@ -6,7 +6,7 @@
  *  - /api/photo          : cache-first di perangkat (dihapus saat logout)
  *  - /api/* lainnya      : network-only (data selalu fresh)
  * ============================================================ */
-const VERSION = 'pendukung-v46';
+const VERSION = 'pendukung-v47';
 const PHOTO_CACHE = 'pendukung-foto-v1';   // foto KTP/TTD (id file tak pernah berubah) — dihapus saat logout
 const PHOTO_MAX = 400;                      // batas jumlah foto tersimpan di perangkat
 const SHELL = [
@@ -91,7 +91,27 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Aset statis: cache-first, lalu isi ulang di belakang
+  // Aset statis: stale-while-revalidate, TAPI file inti aplikasi (JS/CSS/HTML)
+  // selalu ambil yang terbaru dari jaringan lebih dulu.
+  // Alasan: cache-first membuat HP memakai app.js LAMA setelah ada deploy baru →
+  // data terlihat tidak sinkron dengan laptop (yang dapat versi terbaru).
+  const CORE = /\.(js|css|html|webmanifest)$/;
+  if (CORE.test(url.pathname)) {
+    event.respondWith(
+      fetch(req)
+        .then(res => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(VERSION).then(c => c.put(req, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(req).then(hit => hit || new Response('', { status: 504 })))
+    );
+    return;
+  }
+
+  // Aset lain (ikon, gambar): cache-first lalu isi ulang di belakang
   event.respondWith(
     caches.match(req).then(hit => {
       if (hit) {

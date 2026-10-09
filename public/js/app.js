@@ -399,46 +399,48 @@
   }
 
   // Cadangan bila bootstrap gagal (server lambat / kuota Sheets habis / sinyal jelek):
-  // alur lama per bagian — TETAP memulihkan data dari cache lokal bila ada, supaya
-  // halaman Data & Detail Kampung tidak kosong melompong.
+  // TETAP memakai data tersimpan supaya halaman Data & Detail Kampung tidak kosong.
+  // PENTING: jangan paksa mode Offline — sinyal bisa sebenarnya baik, hanya server
+  // yang sempat gagal. Mode Offline &=\u003e tombol ubah mati, dan berikutnya HP/laptop
+  // terlihatbeda (satu online, satu offline) walau datanya sama.
   function legacyStart() {
-    // 1) Coba pakai salinan offline (localStorage, bertahan 3 hari)
+    const restore = (list, meta) => {
+      state.allData = list;
+      state.loadedAt = (meta && meta.at) || Date.now();
+      if (meta && meta.version) state.version = meta.version;
+      try {
+        const cfg = JSON.parse(sessionStorage.getItem('pendukung_config') || 'null');
+        if (cfg) applyConfig(cfg);
+      } catch (e) {}
+      renderCurrentPage();
+      startPolling(true);      // tetap polling → begitu server ok, data terbaru otomatis masuk
+      watchModals();
+      if (window.Notif) window.Notif.onAppReady();
+    };
+
+    // 1) salinan offline (localStorage)
     const snap = offLoad();
     if (snap && snap.boot && Array.isArray(snap.boot.list)) {
-      applyBootstrap(snap.boot);
-      setOfflineUI(true);            // tandai Mode Offline: hanya lihat, tombol ubah dimatikan
-      state.offline = true;
-      state.offlineBoot = false;
-      state.offlineAt = snap.onlineAt || Date.now();
-      stopPolling();
-      renderCurrentPage();
-      startReconnectLoop();
-      toast('⚠️ Data belum bisa dimuat dari server — menampilkan data tersimpan (Mode Offline)', 'warn');
+      if (snap.boot.config) applyConfig(snap.boot.config);
+      restore(snap.boot.list, { at: snap.onlineAt, version: snap.boot.version });
+      toast('⚠️ Data terbaru belum bisa diambil dari server — menampilkan data tersimpan. Akan diperbarui otomatis.', 'warn');
       return;
     }
-    // 2) Cache sesi (sessionStorage) — hanya untuk sesi ini
+    // 2) cache sesi
     try {
       const raw = sessionStorage.getItem('pendukung_cache_v1');
       if (raw) {
         const list = JSON.parse(raw);
         if (Array.isArray(list)) {
-          state.allData = list;
-          state.loadedAt = Number(sessionStorage.getItem('pendukung_cache_at')) || Date.now();
-          state.version = sessionStorage.getItem('pendukung_cache_version') || '0|empty';
-          try {
-            const cfg = JSON.parse(sessionStorage.getItem('pendukung_config') || 'null');
-            if (cfg) applyConfig(cfg);
-          } catch (e) {}
-          renderCurrentPage();
-          startPolling(true);
-          watchModals();
-          toast('⚠️ Gagal memuat dari server — menampilkan data tersimpan. Coba lagi beberapa saat.', 'warn');
+          restore(list, { at: Number(sessionStorage.getItem('pendukung_cache_at')) || Date.now(),
+                          version: sessionStorage.getItem('pendukung_cache_version') });
+          toast('⚠️ Gagal memuat dari server — menampilkan data tersimpan. Akan dicoba lagi otomatis.', 'warn');
           return;
         }
       }
     } catch (e) { /* abaikan */ }
 
-    // 3) benar-benar tidak ada apa pun → alur lama
+    // 3) benar-benar tidak ada apa pun
     loadConfig(() => {
       renderCurrentPage();
       startPolling();
