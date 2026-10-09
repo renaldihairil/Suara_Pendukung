@@ -672,10 +672,9 @@
       const c = $('appContent');
       if (c) c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat data...</p></div>';
       state.detailLoading = true;
-      const token = state.pageToken;
       fetchAndReplace(false, () => {
         state.detailLoading = false;
-        if (isStillOn(token, 'detail-kampung')) renderDetailKampung();
+        if (state.page === 'detail-kampung' && state.allData) renderDetailKampung();
       });
       return;
     }
@@ -948,9 +947,14 @@
         const changed = !prevRev || r.rev !== prevRev;
         applyBootstrap(r);
         state.dataVersion = (state.dataVersion || 0) + 1;
-        if (isStillOn(token, 'data') && $('dataGridWrap')) renderFilteredGrid(true);
-        else if (isStillOn(token, 'dashboard') && $('appContent')) renderDashboardData();
-        else if (isStillOn(token, 'detail-kampung') && $('appContent')) renderDetailKampung();
+        // ⭐ Render ulang halaman yang SEDANG DIBUKA — jangan pakai token request.
+        // Request bootstrap di produksi bisa 10-30 dtk (kuota Sheets); selama itu
+        // pageToken bisa berubah (polling/filter/pindah halaman) sehingga
+        // isStillOn(token,...) jadi false → tabel Data tidak pernah ter-update
+        // padahal Dashboard (pakai cache) sudah ikut berubah.
+        if (state.page === 'data' && $('dataGridWrap')) renderFilteredGrid(true);
+        else if (state.page === 'dashboard' && $('appContent')) renderDashboardData();
+        else if (state.page === 'detail-kampung' && $('appContent')) renderDetailKampung();
         refreshOpenDetail();
         if (silent && changed) {
           showPullIndicator();
@@ -1461,11 +1465,12 @@
 
     if (!state.allData) {
       c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat data...</p></div>';
-      const token = state.pageToken;
       state.detailLoading = true;
+      // fetchAndReplace sudah me-render halaman yang sedang dibuka bila data tiba.
+      // Cukup tandai loading selesai + pastikan authenticate page masih Detail Kampung.
       fetchAndReplace(false, () => {
         state.detailLoading = false;
-        if (isStillOn(token, 'detail-kampung')) renderDetailKampung();
+        if (state.page === 'detail-kampung' && state.allData) renderDetailKampung();
       });
       return;
     }
