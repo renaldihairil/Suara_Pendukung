@@ -4372,6 +4372,131 @@
   // ============================================================ //
   // MODAL EDIT                                                    //
   // ============================================================ //
+  // ============================================================ //
+  // ⭐ SCAN ULANG KTP DARI MODAL EDIT                            //
+  // Ambil foto KTP dari server → OCR → isi kolom yang kosong    //
+  // (Tempat Lahir, Status Perkawinan). Kolom terisi tidak        //
+  // ditimpa. KTP juga tetap tersimpan untuk verifikasi.          //
+  // ============================================================ //
+  function setEditOcrStatus(kind, html) {
+    const el = $('eOcrSt');
+    if (!el) return;
+    el.style.display = html ? '' : 'none';
+    el.className = 'ocr-st' + (kind ? ' show ' + kind : '');
+    el.innerHTML = html || '';
+  }
+
+  async function runKtpOcrEdit(fotoKTPId) {
+    const btn = $('eBtnScanKtp');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ocr-spin" style="display:inline-block;vertical-align:middle;margin-right:6px"></span>Membaca…'; }
+    setEditOcrStatus('busy', '<div class="ocr-row"><span class="ocr-spin"></span><span>Mengambil foto KTP dari server…</span></div>');
+
+    try {
+      // Ambil foto dari server (butuh auth cookie)
+      const fotoUrl = '/api/photo?id=' + encodeURIComponent(fotoKTPId);
+      const resp = await fetch(fotoUrl, { credentials: 'same-origin' });
+      if (!resp.ok) throw new Error('Gagal mengambil foto (HTTP ' + resp.status + ')');
+      const blob = await resp.blob();
+
+      // Kompresi untuk OCR (sama seperti shrinkForOcr di form input)
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Gagal membaca file foto'));
+        reader.readAsDataURL(blob);
+      });
+
+      // Tampilkan status OCR
+      setEditOcrStatus('busy', '<div class="ocr-row"><span class="ocr-spin"></span><span>Membaca data dari KTP…</span></div>');
+
+      // Kompresi untuk OCR (mandiri — sama seperti shrinkForOcr di form input)
+      const img = new Image();
+      img.onload = () => {
+        const tries = [[1280, 0.82], [1100, 0.75], [960, 0.7]];
+        let small = dataUrl;
+        for (const [maxSide, q] of tries) {
+          const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+          const c = document.createElement('canvas');
+          c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+          const g = c.getContext('2d');
+          g.imageSmoothingQuality = 'high';
+          g.drawImage(img, 0, 0, c.width, c.height);
+          small = c.toDataURL('image/jpeg', q);
+          if (small.length < 420000) break;
+        }
+        google.script.run
+          .withSuccessHandler(r => {
+            if (btn) { btn.disabled = false; btn.innerHTML = ICONS.search + ' Scan Ulang KTP'; }
+            showOcrResultEdit(r);
+          })
+          .withFailureHandler(e => {
+            if (btn) { btn.disabled = false; btn.innerHTML = ICONS.search + ' Scan Ulang KTP'; }
+            setEditOcrStatus('err', '⚠️ Gagal membaca otomatis (' + esc(e && e.message ? e.message : 'error') + '). Kolom tetap bisa diisi manual.');
+          })
+          .apiOcrKtp({ image: small });
+      };
+      img.onerror = () => {
+        if (btn) { btn.disabled = false; btn.innerHTML = ICONS.search + ' Scan Ulang KTP'; }
+        setEditOcrStatus('err', '⚠️ Gagal memproses foto KTP');
+      };
+      img.src = dataUrl;
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.innerHTML = ICONS.search + ' Scan Ulang KTP'; }
+      setEditOcrStatus('err', '⚠️ Gagal mengambil foto KTP dari server: ' + esc(e && e.message ? e.message : 'error'));
+    }
+  }
+
+  function showOcrResultEdit(r) {
+    if (!r || !r.ok) {
+      const code = r && r.code;
+      if (code === 'OCR_DISABLED' || code === 'OCR_DENIED') {
+        setEditOcrStatus('warn', 'ℹ️ ' + esc(r.message) + '<br>Kolom tetap bisa diisi manual.');
+      } else {
+        setEditOcrStatus('err', '⚠️ ' + esc((r && r.message) || 'Gagal membaca KTP') + '. Kolom tetap bisa diisi manual.');
+      }
+      return;
+    }
+    const d = r.data || {};
+    if (!r.hasText || (!d.nik && !d.nama)) {
+      setEditOcrStatus('warn', '📷 <b>Tulisan KTP tidak terbaca jelas.</b><br>Coba ganti foto KTP yang lebih jelas, atau isi manual.');
+      return;
+    }
+
+    const filled = [];
+    const tryFillEmpty = (id, label, val) => {
+      if (!val) return;
+      const el = $(id);
+      if (!el) return;
+      const cur = el.value.trim();
+      if (!cur || cur === '') {
+        setFieldAutoEdit(id, val);
+        filled.push(label);
+      }
+    };
+
+    // Hanya isi kolom yang masih kosong — jangan timpa data yang sudah ada
+    tryFillEmpty('eTempatLahir', 'Tempat Lahir', d.tempatLahir);
+    if (STATUS_KAWIN_LIST.indexOf(d.statusPerkawinan) !== -1) {
+      tryFillEmpty('eStatusKawin', 'Status Perkawinan', d.statusPerkawinan);
+    }
+
+    let html = '';
+    if (filled.length) {
+      html += '✅ <b>Terisi otomatis:</b> ' + filled.join(' & ') + '. Kolom yang sudah terisi tidak diubah.' + (r.ms ? ' <span style="opacity:.7">(' + (r.ms / 1000).toFixed(1) + ' dtk)</span>' : '');
+      setEditOcrStatus('ok', html);
+    } else {
+      setEditOcrStatus('warn', 'ℹ️ Semua kolom data diri sudah terisi — tidak ada yang perlu diubah dari hasil scan.');
+    }
+  }
+
+  function setFieldAutoEdit(id, val) {
+    const el = $(id);
+    if (!el) return;
+    el.value = val;
+    el.classList.add('auto-fill');
+    el.addEventListener('input', () => el.classList.remove('auto-fill'), { once: true });
+  }
+
   function openEditModal(p) {
     state.editId = p.id;
     state.fotoBase64 = null;
@@ -4466,7 +4591,12 @@
         '</div>' +
         '<div class="foto-tools" id="eFotoTools">' +
           '<button type="button" id="eBtnFotoEdit">' + ICONS.card + 'Putar / Crop</button>' +
+          (p.fotoKTPId
+            ? '<button type="button" id="eBtnScanKtp">' + ICONS.search + 'Scan Ulang KTP</button>'
+            : ''
+          ) +
         '</div>' +
+        '<div class="ocr-st" id="eOcrSt" style="display:none"></div>' +
       '</div>' +
       buktiTTDHtml +
       '<div class="confirm-btns">' +
@@ -4542,6 +4672,12 @@
       else if (p.fotoKTP) openCropFromUrl(p.fotoKTP);
     });
 
+    // Tombol "Scan Ulang KTP" — ambil foto dari server, OCR, isi kolom kosong
+    const btnScanKtp = $('eBtnScanKtp');
+    if (btnScanKtp && p.fotoKTPId) {
+      btnScanKtp.addEventListener('click', () => runKtpOcrEdit(p.fotoKTPId));
+    }
+
     if (isVerified) {
       const btnTTDKamera = $('eBtnTTDKamera');
       const btnTTDGaleri = $('eBtnTTDGaleri');
@@ -4575,6 +4711,7 @@
       state.editFotoTTDBase64 = null;
       state.editFotoTTDMime = null;
       state.editHapusTTD = false;
+      setEditOcrStatus(null, '');
     });
 
     $('eSave').addEventListener('click', saveEdit);
@@ -4651,6 +4788,7 @@
           state.editFotoTTDBase64 = null;
           state.editFotoTTDMime = null;
           state.editHapusTTD = false;
+          setEditOcrStatus(null, '');
           if (r.version) state.version = r.version;
           state.prevIds = {};
           state.dashboardCache = null;
