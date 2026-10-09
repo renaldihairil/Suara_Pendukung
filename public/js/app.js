@@ -893,9 +893,10 @@
     // Tanpa ini, renderData() + polling (/api/rev) bisa memanggil bersamaan sehingga
     // beberapa permintaan berat ke Google Sheets bertumpuk → Hak akses baca habis (429)
     // → permintaan gagal → status berkedip offline/online → tabel tidak pernah terisi.
-    // Bila ada permintaan yang sedang berjalan, LEWATI diam-diam (JANGAN laporkan
-    // gagal — permintaan yang sedang jalan akan memperbarui halaman saat selesai).
-    if (state.isFetching) return;
+    // Bila ada permintaan yang sedang berjalan, LEWATI (tidak menambah beban
+    // server) — tapi JANGAN diamkan pemanggil: panggil callback dengan 'skipped'
+    // supaya halaman Data tahu harus mencoba lagi (bukan menggantung).
+    if (state.isFetching) { if (typeof callback === 'function') callback('skipped'); return; }
     state.isFetching = true;
     const token = state.pageToken;
     const prevRev = state.rev;
@@ -3361,72 +3362,57 @@
     }
 
     showGridSkeleton();
-    // ⭐ Jaring pengaman: bila fetchAndReplace di-skip (karena ada permintaan lain
-    // yang sedang berjalan), polling tetap berjalan & eventually mengisi grid.
-    // PENTING: jangan pakai pageToken (bisa berubah karena navigasi cepat) —
-    // cukup cek halaman masih "data" & grid masih ada di DOM.
-    const guard = setInterval(() => {
-      const w = $('dataGridWrap');
-      if (state.page !== 'data' || !w) { clearInterval(guard); return; }
-      // ✅ Data sudah ada & grid masih kosong/skeleton → isi sekarang
-      if (state.allData && (w.querySelector('.skeleton') || (!w.querySelector('.prow') && !w.querySelector('.empty-state')))) {
-        clearInterval(guard);
-        renderFilteredGrid();
-        return;
-      }
-      if (state.allData && !w.querySelector('.skeleton')) { clearInterval(guard); return; }   // sudah ter-render
-      if (!state.isFetching && !state.isRevChecking && !state.allData) clearInterval(guard);
-    }, 400);
-    // Muat data. Jika gagal → tampilkan pesan + tombol coba lagi,
-    // JANGAN biarkan skeleton berputar tanpa akhir (terlihat "loading terus").
-    fetchAndReplace(true, ok => {
-      if (ok) { clearInterval(guard); return; }
+    // Muat data sampai BERHASIL. Permintaan yang dilewati (karena ada yang sedang
+    // berjalan) atau gagal sementara (server sibuk / kuota Sheets habis) akan
+    // dicoba lagi dengan jeda memanjang — bukan ditinggalkan selamanya dengan
+    // skeleton berputar.
+    let tries = 0;
+    const loadData = () => {
       if (state.page !== 'data') return;
-      // Permintaan mungkin dilewati karena sedang ada yang lain → tunggu, jangan scare user
-      if (state.isFetching || state.allData) return;
-      const wrap = $('dataGridWrap');
-      const info = $('gridInfo');
-      if (info) info.innerHTML = '';
-      if (wrap) {
-        wrap.innerHTML =
-          '<div class="empty-state">' +
-            '<div class="big">📡</div>' +
-            '<h3>Data belum berhasil dimuat</h3>' +
-            '<p>Server mungkin sedang sibuk atau koneksi tidak stabil. Data Anda aman di Google Spreadsheet.</p>' +
-            '<button class="btn btn-primary" id="btnRetryData" type="button" style="margin-top:12px">' +
-              ICONS.refresh + ' Coba Lagi</button>' +
-          '</div>';
-        const rb = $('btnRetryData');
-        if (rb) rb.addEventListener('click', () => {
-          state._failUntil = 0;
-          state._failCount = 0;
-          rb.disabled = true;
-          rb.textContent = 'Memuat…';
-          showGridSkeleton();
-          // Kalau ada permintaan lain yang sedang jalan, tunggu ia selesai
-          // (polling akan mengisi grid) alih-alih memaksa render ulang.
-          if (state.isFetching) {
-            const t = setInterval(() => {
-              if (state.allData) {
-                clearInterval(t);
-                const w = $('dataGridWrap');
-                if (w && !w.querySelector('.skeleton')) renderFilteredGrid();
-              } else if (!state.isFetching) {
-                clearInterval(t);
-                rb.disabled = false;
-                rb.textContent = ICONS.refresh + ' Coba Lagi';
-              }
-            }, 400);
-            return;
-          }
-          fetchAndReplace(true, ok2 => {
-            if (ok2) return;
-            rb.disabled = false;
-            rb.innerHTML = ICONS.refresh + ' Coba Lagi';
-            if (state.allData && $('dataGridWrap')) renderFilteredGrid();
-          });
-        });
-      }
+      const w = $('dataGridWrap');
+      if (!w) return;
+      if (state.allData) { renderFilteredGrid(); return; }
+      fetchAndReplace(true, ok => {
+        if (state.allData) { renderFilteredGrid(); return; }
+        if (ok) return;
+        tries++;
+        if (tries < 6) {
+          const d = Math.min(800 * tries, 4000);
+          w.style.visibility = 'hidden';
+          setTimeout(() => {
+            const ww = $('dataGridWrap');
+            if (ww) ww.style.visibility = '';
+            loadData();
+          }, d);
+        } else {
+          showDataLoadError();
+        }
+      });
+    };
+    loadData();
+  }
+
+  function showDataLoadError() {
+    const wrap = $('dataGridWrap');
+    const info = $('gridInfo');
+    if (info) info.innerHTML = '';
+    if (!wrap) return;
+    wrap.innerHTML =
+      '<div class="empty-state">' +
+        '<div class="big">📡</div>' +
+        '<h3>Data belum berhasil dimuat</h3>' +
+        '<p>Server mungkin sedang sibuk atau koneksi tidak stabil. Data Anda tetap aman di Google Spreadsheet.</p>' +
+        '<button class="btn btn-primary" id="btnRetryData" type="button" style="margin-top:12px">' +
+          ICONS.refresh + ' Coba Lagi</button>' +
+      '</div>';
+    const rb = $('btnRetryData');
+    if (rb) rb.addEventListener('click', () => {
+      state._failUntil = 0;
+      state._failCount = 0;
+      rb.disabled = true;
+      rb.textContent = 'Memuat…';
+      showGridSkeleton();
+      setTimeout(() => { if (state.page === 'data') renderData(); }, 300);
     });
   }
 
