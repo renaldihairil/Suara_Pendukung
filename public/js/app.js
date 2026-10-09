@@ -398,8 +398,47 @@
       version: r.version, rev: r.rev, dupGroups: r.dupGroups || 0, logs: Array.isArray(r.logs) ? r.logs : (state.dashLogs || null), me: r.me || null } });
   }
 
-  // Cadangan bila bootstrap gagal (mis. server lama): alur lama per bagian
+  // Cadangan bila bootstrap gagal (server lambat / kuota Sheets habis / sinyal jelek):
+  // alur lama per bagian — TETAP memulihkan data dari cache lokal bila ada, supaya
+  // halaman Data & Detail Kampung tidak kosong melompong.
   function legacyStart() {
+    // 1) Coba pakai salinan offline (localStorage, bertahan 3 hari)
+    const snap = offLoad();
+    if (snap && snap.boot && Array.isArray(snap.boot.list)) {
+      applyBootstrap(snap.boot);
+      setOfflineUI(true);            // tandai Mode Offline: hanya lihat, tombol ubah dimatikan
+      state.offline = true;
+      state.offlineBoot = false;
+      state.offlineAt = snap.onlineAt || Date.now();
+      stopPolling();
+      renderCurrentPage();
+      startReconnectLoop();
+      toast('⚠️ Data belum bisa dimuat dari server — menampilkan data tersimpan (Mode Offline)', 'warn');
+      return;
+    }
+    // 2) Cache sesi (sessionStorage) — hanya untuk sesi ini
+    try {
+      const raw = sessionStorage.getItem('pendukung_cache_v1');
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          state.allData = list;
+          state.loadedAt = Number(sessionStorage.getItem('pendukung_cache_at')) || Date.now();
+          state.version = sessionStorage.getItem('pendukung_cache_version') || '0|empty';
+          try {
+            const cfg = JSON.parse(sessionStorage.getItem('pendukung_config') || 'null');
+            if (cfg) applyConfig(cfg);
+          } catch (e) {}
+          renderCurrentPage();
+          startPolling(true);
+          watchModals();
+          toast('⚠️ Gagal memuat dari server — menampilkan data tersimpan. Coba lagi beberapa saat.', 'warn');
+          return;
+        }
+      }
+    } catch (e) { /* abaikan */ }
+
+    // 3) benar-benar tidak ada apa pun → alur lama
     loadConfig(() => {
       renderCurrentPage();
       startPolling();
