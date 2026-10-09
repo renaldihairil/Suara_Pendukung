@@ -3338,7 +3338,9 @@
     }
 
     showGridSkeleton();
-    fetchAndReplace(false);
+    // silent=true: jangan tampilkan status offline/syncing saat memuat awal,
+    // karena data mungkin sedang dimuat oleh halaman lain (mis. dashboard).
+    fetchAndReplace(true);
   }
 
   function showGridSkeleton() {
