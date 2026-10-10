@@ -1764,3 +1764,7 @@ img,canvas,.foto-wrap,.modal-foto{-webkit-touch-callout:none;-webkit-user-select
 
 #btnDetailKtpTtd{grid-column:1/-1;width:100%;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
 #btnDetailKtpTtd:disabled{background:#fff;border-color:var(--border);color:var(--muted)}
+
+/* Posisi Scan Duplikat dapat diseret dengan mouse atau sentuhan. */
+.fab-scan{touch-action:none;user-select:none;cursor:grab}
+.fab-scan.dragging{cursor:grabbing;transform:none!important;animation:none!important;transition:none}

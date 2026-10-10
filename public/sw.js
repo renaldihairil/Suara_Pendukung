@@ -6,7 +6,7 @@
  *  - /api/photo          : cache-first di perangkat (dihapus saat logout)
  *  - /api/* lainnya      : network-only (data selalu fresh)
  * ============================================================ */
-const VERSION = 'pendukung-v50';
+const VERSION = 'pendukung-v51';
 const PHOTO_CACHE = 'pendukung-foto-v1';   // foto KTP/TTD (id file tak pernah berubah) — dihapus saat logout
 const PHOTO_MAX = 400;                      // batas jumlah foto tersimpan di perangkat
 const SHELL = [
@@ -21,6 +21,7 @@ const SHELL = [
   '/js/kotaksuara.js',
   '/js/fotoaman.js',
   '/js/app.js',
+  '/js/scan-position.js',
   '/js/pages.js',
   '/js/notif.js',
   '/js/pwa.js',
