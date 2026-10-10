@@ -11,6 +11,13 @@
   const ENDPOINT = '/api/rpc';
 
   async function callApi(fnName, args) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 65000);
+    try { return await callApiRequest(fnName, args, ctl); }
+    finally { clearTimeout(timer); }
+  }
+
+  async function callApiRequest(fnName, args, ctl) {
     if (window.__offlineMode) throw new Error('📴 Tidak ada internet — fitur ini butuh koneksi');
     const payload = args && args.length === 1 && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])
       ? args[0]
@@ -19,11 +26,13 @@
     try {
       res = await fetch(ENDPOINT, {
         method: 'POST',
+        signal: ctl.signal,
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify(Object.assign({ action: fnName }, payload))
       });
     } catch (e) {
+      if (e.name === 'AbortError') throw new Error('Timeout: server terlalu lama merespons. Coba lagi.');
       throw new Error('Tidak bisa terhubung ke server. Periksa koneksi internet.');
     }
     if (res.status === 401) {
@@ -36,7 +45,10 @@
       throw new Error('Unauthorized');
     }
     let data = null;
-    try { data = await res.json(); } catch (e) { data = null; }
+    try { data = await res.json(); } catch (e) {
+      if (ctl.signal.aborted) throw new Error('Timeout: server terlalu lama merespons. Coba lagi.');
+      throw new Error('Respons server tidak valid. Coba lagi.');
+    }
     if (!res.ok) {
       throw new Error((data && data.message) ? data.message : ('HTTP ' + res.status));
     }
