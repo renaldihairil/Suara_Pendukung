@@ -30,7 +30,7 @@
     detailFilterVerif: '',
     detailSortAZ: 'asc',   // ⭐ NEW: 'asc' | 'desc' | 'default'
     detailLoading: false,
-    filter: { q: '', kampung: '', rt: '', verified: '', dicetak: '', sortAz: 'default' },
+    filter: { q: '', kampung: '', rt: '', verified: '', dicetak: '', ktp: '', sortAz: 'default' },
     currentPage: 1,
     fotoBase64: null,
     fotoMime: null,
@@ -568,6 +568,9 @@
     document.querySelectorAll('.live-tag').forEach(el => { el.innerHTML = liveTagHtml(); });
   }
 
+  function hasKtp(p) { return !!String(p.fotoKTPId || '').trim(); }
+  function printLabel(p) { return hasKtp(p) ? (p.dicetak === true ? 'Sudah cetak' : 'Belum cetak') : 'Tidak ada KTP'; }
+
   function dashboardFromList(list) {
     const d = Object.assign({}, state.dashboardCache || {}, {
       total: list.length, laki: 0, perempuan: 0, verified: 0, unverified: 0,
@@ -581,7 +584,7 @@
       if (p.jenisKelamin === 'Laki-laki') d.laki++;
       if (p.jenisKelamin === 'Perempuan') d.perempuan++;
       d[p.verified ? 'verified' : 'unverified']++;
-      d[p.dicetak ? 'dicetak' : 'belumCetak']++;
+      if (hasKtp(p)) d[p.dicetak ? 'dicetak' : 'belumCetak']++;
       if (p.fotoTTDId) d.ttdCount++;
       if (new Date(p.timestamp).toDateString() === today) d.hariIni++;
       d.perKampung[p.kampung] = (d.perKampung[p.kampung] || 0) + 1;
@@ -2466,7 +2469,8 @@
     }
     if (state.filter.verified === 'true') list = list.filter(x => x.verified === true);
     else if (state.filter.verified === 'false') list = list.filter(x => x.verified !== true);
-    return list.filter(x => x.fotoKTPId && String(x.fotoKTPId).trim());
+    if (state.filter.ktp === 'false') return [];
+    return list.filter(hasKtp);
   }
 
   function bulkKtpFilterLabel() {
@@ -3302,8 +3306,8 @@
     const countAll = baseList.length;
     const countVerified = baseList.filter(x => x.verified === true).length;
     const countUnverified = countAll - countVerified;
-    const countDicetak = baseList.filter(x => x.dicetak === true).length;
-    const countBelumCetak = countAll - countDicetak;
+    const countDicetak = baseList.filter(x => hasKtp(x) && x.dicetak === true).length;
+    const countBelumCetak = baseList.filter(x => hasKtp(x) && x.dicetak !== true).length;
 
     let kampungOpts = '<option value="">Semua Kampung</option>';
     KAMPUNG_LIST.forEach(k => {
@@ -3327,9 +3331,15 @@
     printOpts += '<option value="true"' + (state.filter.dicetak === 'true' ? ' selected' : '') + '>🖨️ Sudah Dicetak (' + countDicetak + ')</option>';
     printOpts += '<option value="false"' + (state.filter.dicetak === 'false' ? ' selected' : '') + '>📄 Belum Dicetak (' + countBelumCetak + ')</option>';
 
-    const countLaki = baseList.filter(x => x.jenisKelamin !== 'Perempuan').length;
-    const countPerempuan = countAll - countLaki;
-    const pctOf = n => countAll > 0 ? Math.round((n / countAll) * 100) : 0;
+    const countKtp = baseList.filter(hasKtp).length;
+    const ktpOpts = '<option value="">Semua File KTP</option>' +
+      '<option value="true"' + (state.filter.ktp === 'true' ? ' selected' : '') + '>Ada KTP (' + countKtp + ')</option>' +
+      '<option value="false"' + (state.filter.ktp === 'false' ? ' selected' : '') + '>Tanpa KTP (' + (countAll - countKtp) + ')</option>';
+    const statsList = getFilteredData();
+    const statsCount = statsList.length;
+    const countLaki = statsList.filter(x => x.jenisKelamin !== 'Perempuan').length;
+    const countPerempuan = statsCount - countLaki;
+    const pctOf = n => statsCount > 0 ? Math.round((n / statsCount) * 100) : 0;
     const miniStat = (tone, ico, label, val, sub) =>
       '<div class="mini-stat"><div class="sc-ico ico-' + tone + '">' + ico + '</div>' +
       '<div class="ms-body"><div class="ms-label">' + label + '</div><div class="ms-value">' + fmtNum(val) + '</div><div class="ms-sub">' + sub + '</div></div></div>';
@@ -3346,10 +3356,10 @@
     c.innerHTML =
       pageHead('Data Pendukung', 'Kelola data pendukung secara lengkap dan terstruktur.', headActions) +
       '<div class="mini-stats">' +
-        miniStat('blue', ICONS.users, 'Total Pendukung', countAll, 'sesuai filter') +
+        miniStat('blue', ICONS.users, 'Total Pendukung', statsCount, 'sesuai filter') +
         miniStat('green', ICONS.male, 'Laki-laki', countLaki, pctOf(countLaki) + '%') +
         miniStat('pink', ICONS.female, 'Perempuan', countPerempuan, pctOf(countPerempuan) + '%') +
-        miniStat('emerald', ICONS.shield, 'Suara PASTI', countVerified, pctOf(countVerified) + '%') +
+        miniStat('emerald', ICONS.shield, 'Suara PASTI', statsList.filter(x => x.verified === true).length, pctOf(statsList.filter(x => x.verified === true).length) + '%') +
       '</div>' +
       '<div class="filter-bar">' +
         '<div class="filter-search">' + ICONS.search +
@@ -3360,6 +3370,7 @@
           '<select id="fFilterRt" aria-label="Filter RT">' + rtOpts + '</select>' +
           '<select id="fFilterVerified" aria-label="Filter status suara">' + verifiedOpts + '</select>' +
           '<select id="fFilterDicetak" aria-label="Filter status cetak">' + printOpts + '</select>' +
+          '<select id="fFilterKtp" aria-label="Filter file KTP">' + ktpOpts + '</select>' +
         '</div>' +
       '</div>' +
       '<div class="grid-info" id="gridInfo"></div>' +
@@ -3390,6 +3401,7 @@
       renderData();
     });
 
+    $('fFilterKtp').addEventListener('change', e => { state.filter.ktp = e.target.value; state.currentPage = 1; renderData(); });
     $('fFilterDicetak').addEventListener('change', e => {
       state.filter.dicetak = e.target.value;
       state.currentPage = 1;
@@ -3507,8 +3519,10 @@
     }
     if (state.filter.verified === 'true') filtered = filtered.filter(x => x.verified === true);
     else if (state.filter.verified === 'false') filtered = filtered.filter(x => x.verified !== true);
-    if (state.filter.dicetak === 'true') filtered = filtered.filter(x => x.dicetak === true);
-    else if (state.filter.dicetak === 'false') filtered = filtered.filter(x => x.dicetak !== true);
+    if (state.filter.ktp === 'true') filtered = filtered.filter(hasKtp);
+    else if (state.filter.ktp === 'false') filtered = filtered.filter(x => !hasKtp(x));
+    if (state.filter.dicetak === 'true') filtered = filtered.filter(x => hasKtp(x) && x.dicetak === true);
+    else if (state.filter.dicetak === 'false') filtered = filtered.filter(x => hasKtp(x) && x.dicetak !== true);
     // Urutkan nama A–Z / Z–A bila dipilih (default: urutan asli)
     if (state.filter.sortAz === 'asc') {
       filtered = filtered.slice().sort((a, b) => (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' }));
@@ -3525,6 +3539,12 @@
     if (!wrap) return;
 
     const filtered = getFilteredData();
+    const counts = [filtered.length, filtered.filter(x => x.jenisKelamin !== 'Perempuan').length,
+      filtered.filter(x => x.jenisKelamin === 'Perempuan').length, filtered.filter(x => x.verified === true).length];
+    document.querySelectorAll('#appContent .mini-stats .ms-value').forEach((el, i) => { el.textContent = fmtNum(counts[i]); });
+    document.querySelectorAll('#appContent .mini-stats .ms-sub').forEach((el, i) => {
+      if (i) el.textContent = (counts[0] ? Math.round(counts[i] / counts[0] * 100) : 0) + '%';
+    });
     const selOn = state.sel.on;
     state.sel.pageIds = [];
 
@@ -3547,6 +3567,7 @@
       if (state.filter.rt) parts.push(state.filter.rt === RT_UMUM ? 'UMUM' : ('RT ' + normRT(state.filter.rt)));
       if (state.filter.verified === 'true') parts.push('✅ Pasti');
       else if (state.filter.verified === 'false') parts.push('⏳ Belum');
+      if (state.filter.ktp) parts.push(state.filter.ktp === 'true' ? 'Ada KTP' : 'Tanpa KTP');
       if (state.filter.dicetak === 'true') parts.push('🖨️ Sudah Cetak');
       else if (state.filter.dicetak === 'false') parts.push('🖨️ Belum Cetak');
       if (parts.length) infoText += ' • filter: ' + parts.join(', ');
@@ -3610,7 +3631,7 @@
             '<div class="pn-txt">' +
               '<div class="person-name" title="' + esc(p.nama) + '">' + esc(p.nama) + '</div>' +
               '<div class="pn-sub"><span class="pn-nik">' + esc(p.nik) + '</span><span class="pn-loc">' + esc(p.kampung) + ' • ' + rtLabel(p.rt) + '</span>' +
-              '<span class="pn-status">' + esc(isVerified ? '✅ Pasti' : '⏳ Belum') + ' • ' + esc(isPrinted ? 'Sudah cetak' : 'Belum cetak') + '</span></div>' +
+              '<span class="pn-status">' + esc(isVerified ? '✅ Pasti' : '⏳ Belum') + ' • ' + esc(printLabel(p)) + '</span></div>' +
             '</div>' +
           '</div>' +
           '<div class="pc-tempat">' + esc((p.tempatLahir || '').trim() || '-') + '</div>' +
@@ -3772,8 +3793,9 @@
   // ⭐ CEKLIST MASSAL STATUS CETAK                                //
   // ============================================================ //
   // Pilih banyak data (lintas halaman & filter), lalu tandai Sudah /
-  // Belum Dicetak sekaligus. Tidak bergantung pada foto KTP — data
-  // tanpa foto juga bisa ditandai. Server: apiSetPrintBatch (1x tulis).
+  // Belum Dicetak sekaligus. Status cetak hanya berlaku untuk data dengan KTP.
+  // Data
+  // tanpa foto tidak diberi status cetak. Server memvalidasi file KTP.
   function selCount() { return Object.keys(state.sel.ids).length; }
 
   function enterSelMode() {
@@ -3836,9 +3858,9 @@
     const pageIds = state.sel.pageIds || [];
     const pageAll = pageIds.length > 0 && pageIds.every(id => state.sel.ids[id]);
     const allFilter = filteredIds.length > 0 && inFilter === filteredIds.length;
-    const belumIds = filtered.filter(p => p.dicetak !== true).map(p => String(p.id));
+    const belumIds = filtered.filter(p => hasKtp(p) && p.dicetak !== true).map(p => String(p.id));
     const sel = Object.keys(state.sel.ids).map(id => byId[id]);
-    const nBelum = sel.filter(p => p.dicetak !== true).length;
+    const nBelum = sel.filter(p => hasKtp(p) && p.dicetak !== true).length;
     const nSudah = n - nBelum;
     const nTanpaFoto = sel.filter(p => !(p.fotoKTPId && String(p.fotoKTPId).trim())).length;
     const busy = state.sel.busy;
@@ -3884,7 +3906,7 @@
     (state.allData || []).forEach(p => { byId[p.id] = p; });
     const sel = Object.keys(state.sel.ids).map(id => byId[id]).filter(Boolean);
     // Hanya kirim yang statusnya memang berubah
-    const target = sel.filter(p => (p.dicetak === true) !== dicetak);
+    const target = sel.filter(p => hasKtp(p) && (p.dicetak === true) !== dicetak);
     if (!target.length) { toast('Tidak ada data yang perlu diubah', 'warn'); return; }
     const lewati = sel.length - target.length;
     const tanpaFoto = target.filter(p => !(p.fotoKTPId && String(p.fotoKTPId).trim())).length;
@@ -3896,7 +3918,7 @@
       '<b>' + target.length + ' data</b> akan ditandai <b>' + label + '</b>.<br>' +
       '<span style="font-size:12px">' + contoh + '</span>' +
       (dicetak && tanpaFoto ? '<br><br>Termasuk <b>' + tanpaFoto + ' data tanpa foto KTP</b>.' : '') +
-      (lewati ? '<br>' + lewati + ' data terpilih lainnya sudah berstatus ' + label.toLowerCase() + ', dilewati.' : '');
+      (lewati ? '<br>' + lewati + ' data terpilih lainnya tidak perlu diubah atau tanpa KTP, dilewati.' : '');
     $('confirmYes').textContent = 'Ya, Tandai ' + target.length;
     state.confirmCb = () => applySelPrint(target.map(p => String(p.id)), dicetak);
     $('modalConfirm').classList.add('show');
@@ -3984,7 +4006,7 @@
             (isVerified ? ICONS.shield + ' SUARA PASTI' : ICONS.clock + ' BELUM PASTI') +
           '</span>' +
           '<span class="person-print-tag ' + (isPrinted ? 'printed' : 'unprinted') + '" style="margin-top:6px">' +
-            ICONS.printer + (isPrinted ? ' SUDAH DICETAK' : ' BELUM DICETAK') +
+            ICONS.printer + (' ' + printLabel(p).toUpperCase()) +
           '</span>' +
         '</div>' +
         '<button class="modal-close" id="btnCloseDetailWarga" type="button" title="Tutup">' + ICONS.close + '</button>' +
@@ -4033,7 +4055,7 @@
           : '<button class="btn btn-primary wa-main" id="btnDetailVerify" type="button">' + ICONS.shield + ' Verifikasi Sekarang</button>'
         ) +
         '<button class="btn wa-btn wa-edit" id="btnDetailEdit" type="button">' + ICONS.edit + ' Edit Data</button>' +
-        '<button class="btn wa-btn wa-print" id="btnDetailPrint" type="button">' + ICONS.printer + (isPrinted ? ' Tandai Belum Cetak' : ' Tandai Sudah Cetak') + '</button>' +
+        '<button class="btn wa-btn wa-print" id="btnDetailPrint" type="button"' + (hasKtp(p) ? '' : ' disabled') + '>' + ICONS.printer + (isPrinted ? ' Tandai Belum Cetak' : ' Tandai Sudah Cetak') + '</button>' +
         '<button class="btn wa-btn wa-ktp" id="btnDetailKtp" type="button"' + (p.fotoKTPId ? '' : ' disabled') + '>' + ICONS.download + ' Unduh KTP</button>' +
         (isAdmin() ? '<button class="btn wa-btn wa-del" id="btnDetailDel" type="button">' + ICONS.trash + ' Hapus Data</button>' : '') +
         '<button class="btn wa-btn wa-ktp" id="btnDetailKtpTtd" type="button"' + (hasTtdDigital(p) && p.fotoKTPId ? '' : ' disabled') + ' title="' +
@@ -4341,6 +4363,7 @@
     const p = (state.allData || []).find(x => String(x.id) === String(id));
     if (!p) { toast('Data tidak ditemukan', 'error'); return; }
 
+    if (!hasKtp(p)) { toast('Tidak ada file KTP untuk dicetak', 'warn'); return; }
     const next = !(p.dicetak === true);
     if (btnEl) btnEl.disabled = true;
 

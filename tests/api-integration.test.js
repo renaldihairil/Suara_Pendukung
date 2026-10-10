@@ -26,7 +26,7 @@ test('real API handlers retain login, add, edit, print, filter and delete behavi
   }
   const initial = await rpc('apiGetBootstrap', { fresh: true });
   assert.equal(initial.dashboard.total, initial.list.length);
-  const a = await rpc('apiAdd', { nama: 'Uji Sinkron', nik: '5203080101900001', kampung: 'Sasak', rt: '001' });
+  const a = await rpc('apiAdd', { nama: 'Uji Sinkron', nik: '5203080101900001', kampung: 'Sasak', rt: '001', fotoBase64: 'dGVzdA==', fotoMime: 'image/jpeg' });
   const b = await rpc('apiAdd', { nama: 'Uji Perempuan', nik: '5203084101900002', kampung: 'Sasak', rt: '002' });
   const afterAdd = await rpc('apiGetBootstrap', { fresh: true });
   assert.equal(afterAdd.list.length, initial.list.length + 2);
@@ -34,10 +34,25 @@ test('real API handlers retain login, add, edit, print, filter and delete behavi
   assert.equal(afterAdd.dashboard.laki, 1); assert.equal(afterAdd.dashboard.perempuan, 1);
   assert.notEqual(afterAdd.rev, initial.rev);
   const rev = await (await fetch(base + '/api/rev')).json(); assert.equal(rev.rev, afterAdd.rev);
+  assert.equal(afterAdd.list.find(x => x.id === b.id).dicetak, null);
+  assert.equal(afterAdd.dashboard.belumCetak, 1);
+  assert.equal((await rpc('apiGetList', { ktp: 'false' })).total, 1);
+  assert.equal((await rpc('apiGetList', { dicetak: 'false' })).total, 1);
+  const noKtp = await fetch(base + '/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ action: 'apiTogglePrint', args: [b.id, true] }) });
+  assert.equal((await noKtp.json()).ok, false);
+  const mixed = await fetch(base + '/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ action: 'apiSetPrintBatch', args: [[a.id, b.id], true] }) });
+  assert.equal((await mixed.json()).ok, false);
+  assert.equal((await rpc('apiGetBootstrap', { fresh: true })).dashboard.dicetak, 0);
   await rpc('apiTogglePrint', { args: [a.id, true] });
-  await rpc('apiUpdate', { id: b.id, nama: 'Nama Diperbarui', nik: '5203084101900002', kampung: 'Sasak', rt: '003' });
+  await rpc('apiUpdate', { id: a.id, nama: 'Uji Sinkron', nik: '5203080101900001', kampung: 'Sasak', rt: '001', fotoBase64: 'bmV3', fotoMime: 'image/jpeg' });
+  await rpc('apiUpdate', { id: b.id, nama: 'Nama Diperbarui', nik: '5203084101900002', kampung: 'Sasak', rt: '003', fotoBase64: 'dGVzdA==', fotoMime: 'image/jpeg' });
   const changed = await rpc('apiGetBootstrap', { fresh: true });
   assert.equal(changed.dashboard.dicetak, 1);
+  assert.equal(changed.dashboard.belumCetak, 1);
+  assert.equal(changed.list.find(x => x.id === b.id).dicetak, false);
+  assert.equal((await rpc('apiGetList', { ktp: 'true' })).total, 2);
   assert.equal(changed.list.find(x => x.id === b.id).nama, 'Nama Diperbarui');
   assert.notEqual(changed.rev, afterAdd.rev);
   const filtered = await rpc('apiGetList', { q: 'Diperbarui', rt: '003' }); assert.equal(filtered.total, 1);

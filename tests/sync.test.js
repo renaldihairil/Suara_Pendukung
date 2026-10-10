@@ -57,7 +57,7 @@ test('reconnect fetches and restarts polling only after response', () => {
 });
 function storeHarness() {
   let reads = 0, fail = false;
-  let rows = [['ID'], ['1', '2026-10-10', 'Satu', '123', 'Laki-laki', '', '', 'Sasak', '001', '', '', true, '', '', true],
+  let rows = [['ID'], ['1', '2026-10-10', 'Satu', '123', 'Laki-laki', '', '', 'Sasak', '001', '', 'ktp1', true, '', '', true],
     ['2', '', 'Dua', '456', 'Perempuan', '', '', 'Sasak', '002', '', '', false]];
   const cfgRows = [['Key', 'Value']];
   const sheets = { SHEET_PENDUKUNG: 'Pendukung', SHEET_CONFIG: 'Config',
@@ -67,7 +67,7 @@ function storeHarness() {
   const domain = { parseConfigFromRows: () => cfg, normRT: String,
     normVerified: Boolean, normBool: Boolean,
     rowToPendukung: r => r[0] ? { id: r[0], timestamp: r[1], nama: r[2], nik: r[3],
-      jenisKelamin: r[4], kampung: r[7], rt: r[8], verified: !!r[11], dicetak: !!r[14] } : null };
+      jenisKelamin: r[4], kampung: r[7], rt: r[8], fotoKTPId: r[10] || '', verified: !!r[11], dicetak: !!r[14] } : null };
   const ctx = { module: { exports: {} }, console, require(n) {
     if (n === './gsheets') return sheets; if (n === './domain') return domain;
     if (n === './gdrive' || n === './roles') return {}; return require(n);
@@ -102,7 +102,7 @@ test('Sheets failure returns revision HTTP 503, not success', async () => {
 test('offline/cache dashboard totals match list and label is not realtime', () => {
   const ctx = { state: {}, Date, TARGET_TOTAL: 750, TARGET_PER_KAMPUNG: {}, KAMPUNG_LIST: ['Sasak'],
     NAMA_PILKADES: '', NAMA_KANDIDAT: '', HARI_H: null };
-  vm.createContext(ctx); vm.runInContext(appFunction('dashboardFromList'), ctx);
+  vm.createContext(ctx); vm.runInContext(appFunction('hasKtp'), ctx); vm.runInContext(appFunction('dashboardFromList'), ctx);
   vm.runInContext(appFunction('liveTagHtml'), ctx);
   const d = ctx.dashboardFromList([{ jenisKelamin: 'Perempuan', verified: true, dicetak: true, kampung: 'Sasak' }]);
   assert.equal(d.total, 1); assert.equal(d.perempuan, 1); assert.equal(d.verified, 1);
