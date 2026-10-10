@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "node mock/dev-server.js",
+    "test": "node --test tests",
     "start": "node mock/dev-server.js"
   },
   "dependencies": {

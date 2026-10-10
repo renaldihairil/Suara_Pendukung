@@ -218,16 +218,23 @@
     applyRoleUI();
     state.usersCache = null; state.logsCache = null;       // muat ulang yang terbaru saat dibuka
     renderCurrentPage();                                   // tombol ubah data muncul kembali
-    toast('✅ Kembali online — data diperbarui', 'success');
-    state.isFetching = true;
-    fetchAndReplace(true, () => { renderCurrentPage(); startPolling(true); if (wasBoot) watchModals(); if (window.Notif) window.Notif.onAppReady(); }, {});
+    state._failUntil = 0;
+    state._failCount = 0;
+    setSyncStatus('syncing');
+    fetchAndReplace(true, ok => {
+      renderCurrentPage();
+      startPolling(true);
+      if (ok === true) toast('✅ Kembali online — data diperbarui', 'success');
+      if (wasBoot) watchModals();
+      if (window.Notif) window.Notif.onAppReady();
+    }, {});
   }
 
-  async function fetchJsonTimeout(url, ms) {
+  async function fetchJsonTimeout(url, ms, cacheMode) {
     const ctl = new AbortController();
     const tm = setTimeout(() => ctl.abort(), ms);
     try {
-      const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
+      const r = await fetch(url, { credentials: 'same-origin', cache: cacheMode || 'no-store', signal: ctl.signal });
       if (r.status >= 500) throw new Error('HTTP ' + r.status);
       return await r.json();
     } finally { clearTimeout(tm); }
@@ -244,6 +251,7 @@
     if (Array.isArray(snap.users)) state.usersCache = snap.users;
     if (Array.isArray(snap.logs)) state.logsCache = snap.logs;
     applyBootstrap(snap.boot);
+    state.dashboardCache = dashboardFromList(state.allData || []);
     state.page = 'dashboard';
     state.pageToken++;
     markNav('dashboard');
@@ -348,18 +356,13 @@
     });
     const c = $('appContent');
     if (c) c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat data...</p></div>';
-    // SATU permintaan untuk semua data awal (config + dashboard + daftar + versi + badge duplikat)
-    google.script.run
-      .withSuccessHandler(r => {
-        if (!r || !r.ok) { legacyStart(); return; }
-        applyBootstrap(r);
-        renderCurrentPage();
-        startPolling(true);          // data baru saja dimuat → cek perubahan berikutnya sesuai interval
-        watchModals();
-        if (window.Notif) window.Notif.onAppReady();
-      })
-      .withFailureHandler(() => legacyStart())
-      .apiGetBootstrap();
+    fetchAndReplace(true, ok => {
+      if (ok !== true) { legacyStart(); return; }
+      renderCurrentPage();
+      startPolling(true);
+      watchModals();
+      if (window.Notif) window.Notif.onAppReady();
+    });
   }
 
   function applyBootstrap(r) {
@@ -412,15 +415,18 @@
         const cfg = JSON.parse(sessionStorage.getItem('pendukung_config') || 'null');
         if (cfg) applyConfig(cfg);
       } catch (e) {}
+      state.rev = null;
+      state.dashboardCache = dashboardFromList(list);
+      setSyncStatus('stale');
       renderCurrentPage();
-      startPolling(true);      // tetap polling → begitu server ok, data terbaru otomatis masuk
+      startPolling();      // tetap polling → begitu server ok, data terbaru otomatis masuk
       watchModals();
       if (window.Notif) window.Notif.onAppReady();
     };
 
     // 1) salinan offline (localStorage)
     const snap = offLoad();
-    if (snap && snap.boot && Array.isArray(snap.boot.list)) {
+    if (snap && snap.user.username === state.user.username && snap.boot && Array.isArray(snap.boot.list)) {
       if (snap.boot.config) applyConfig(snap.boot.config);
       restore(snap.boot.list, { at: snap.onlineAt, version: snap.boot.version });
       toast('⚠️ Data terbaru belum bisa diambil dari server — menampilkan data tersimpan. Akan diperbarui otomatis.', 'warn');
@@ -546,20 +552,44 @@
     t._tm = setTimeout(() => t.className = 'toast ' + (type || ''), 3200);
   }
 
+  function liveTagHtml() {
+    const status = state.offline ? 'offline' : (state.syncStatus || 'stale');
+    const label = { online: 'Realtime', syncing: 'Sinkronisasi...', offline: 'Offline', stale: 'Data tersimpan' }[status];
+    const cls = status === 'online' ? '' : (status === 'syncing' ? ' syncing' : ' offline');
+    return '<span class="sync-dot' + cls + '"></span>' + label;
+  }
+
   function setSyncStatus(status) {
+    state.syncStatus = status;
     const dot = $('syncDot');
     const txt = $('headerStatus');
-    if (!dot || !txt) return;
-    if (status === 'syncing') {
-      dot.className = 'sync-dot syncing';
-      txt.textContent = 'Sinkronisasi...';
-    } else if (status === 'offline') {
-      dot.className = 'sync-dot offline';
-      txt.textContent = 'Offline';
-    } else {
-      dot.className = 'sync-dot';
-      txt.textContent = 'Live';
-    }
+    if (dot) dot.className = 'sync-dot' + (status === 'online' ? '' : (status === 'syncing' ? ' syncing' : ' offline'));
+    if (txt) txt.textContent = { online: 'Live', syncing: 'Sinkronisasi...', offline: 'Offline', stale: 'Data tersimpan' }[status];
+    document.querySelectorAll('.live-tag').forEach(el => { el.innerHTML = liveTagHtml(); });
+  }
+
+  function dashboardFromList(list) {
+    const d = Object.assign({}, state.dashboardCache || {}, {
+      total: list.length, laki: 0, perempuan: 0, verified: 0, unverified: 0,
+      dicetak: 0, belumCetak: 0, ttdCount: 0, hariIni: 0, perKampung: {}, kampungVerified: {},
+      target: TARGET_TOTAL, targetPerKampung: TARGET_PER_KAMPUNG, kampungList: KAMPUNG_LIST,
+      namaPilkades: NAMA_PILKADES, namaKandidat: NAMA_KANDIDAT, hariH: HARI_H
+    });
+    KAMPUNG_LIST.forEach(k => { d.perKampung[k] = 0; d.kampungVerified[k] = 0; });
+    const today = new Date().toDateString();
+    list.forEach(p => {
+      if (p.jenisKelamin === 'Laki-laki') d.laki++;
+      if (p.jenisKelamin === 'Perempuan') d.perempuan++;
+      d[p.verified ? 'verified' : 'unverified']++;
+      d[p.dicetak ? 'dicetak' : 'belumCetak']++;
+      if (p.fotoTTDId) d.ttdCount++;
+      if (new Date(p.timestamp).toDateString() === today) d.hariIni++;
+      d.perKampung[p.kampung] = (d.perKampung[p.kampung] || 0) + 1;
+      if (p.verified) d.kampungVerified[p.kampung] = (d.kampungVerified[p.kampung] || 0) + 1;
+    });
+    STATS_PER_KAMPUNG = d.perKampung;
+    STATS_VERIFIED_PER_KAMPUNG = d.kampungVerified;
+    return d;
   }
 
   function showPullIndicator() {
@@ -893,24 +923,22 @@
   }
 
   function syncData(silent) {
-    if (state.isFetching || state.isRevChecking) return;
+    if (state.offline || state.isFetching || state.isRevChecking) return;
     // Jeda setelah gagal: tanpa ini halaman Data mengulang permintaan berat setiap
     // 4 detik saat server sibuk/kuota habis → makin buruk & tabel tak pernah terisi.
     if (state._failUntil && Date.now() < state._failUntil) return;
     state.isRevChecking = true;
     if (!silent) setSyncStatus('syncing');
-    fetch('/api/rev', { credentials: 'same-origin', cache: 'no-cache' })
-      .then(r => r.ok ? r.json() : null)
+    fetchJsonTimeout('/api/rev', 15000, 'no-cache')
       .then(r => {
         state.isRevChecking = false;
-        if (!r || !r.ok) { if (!silent) setSyncStatus('offline'); return; }
+        if (!r || !r.ok || !r.rev) throw new Error('Pemeriksaan data gagal');
         state._revFail = 0;
         offTouch(false);
-        setSyncStatus('online');
-        if (state.rev && r.rev === state.rev && state.allData) return;       // tidak ada perubahan
+        if (state.rev && r.rev === state.rev && state.allData) { setSyncStatus('online'); return; }       // tidak ada perubahan
         // isFetching dipegang fetchAndReplace (jangan diset di sini, agar guard-nya bekerja)
         fetchAndReplace(true, ok => {
-          if (ok) { state._failCount = 0; state._failUntil = 0; }
+          if (ok === true) { state._failCount = 0; state._failUntil = 0; }
           else {
             // Mundur bertahap: 5s → 10s → 20s → 40s → maks 60s
             state._failCount = Math.min((state._failCount || 0) + 1, 5);
@@ -920,10 +948,10 @@
       })
       .catch(() => {
         state.isRevChecking = false;
-        if (!silent) setSyncStatus('offline');
-        // 2x berturut-turut gagal terhubung (±8 dtk) → Mode Offline (hanya lihat) sampai internet kembali
+        setSyncStatus('stale');
+        // Kegagalan server bukan bukti koneksi perangkat terputus.
         state._revFail = (state._revFail || 0) + 1;
-        if (state._revFail >= 2 && state.allData) enterOffline('drop');
+        if (navigator.onLine === false && state.allData) enterOffline('drop');
       });
   }
 
@@ -933,17 +961,24 @@
     // Tanpa ini, renderData() + polling (/api/rev) bisa memanggil bersamaan sehingga
     // beberapa permintaan berat ke Google Sheets bertumpuk → Hak akses baca habis (429)
     // → permintaan gagal → status berkedip offline/online → tabel tidak pernah terisi.
-    // Bila ada permintaan yang sedang berjalan, LEWATI (tidak menambah beban
-    // server) — tapi JANGAN diamkan pemanggil: panggil callback dengan 'skipped'
-    // supaya halaman Data tahu harus mencoba lagi (bukan menggantung).
-    if (state.isFetching) { if (typeof callback === 'function') callback('skipped'); return; }
+    // Pemanggil lain menunggu hasil permintaan yang sama tanpa RPC tambahan.
+    if (state.isFetching) {
+      if (typeof callback === 'function') (state.fetchWaiters || (state.fetchWaiters = [])).push(callback);
+      return;
+    }
+    const finish = ok => {
+      const waiters = state.fetchWaiters || [];
+      state.fetchWaiters = [];
+      if (typeof callback === 'function') waiters.unshift(callback);
+      waiters.forEach(cb => { try { cb(ok); } catch (e) { console.error('[sync callback]', e); } });
+    };
     state.isFetching = true;
-    const token = state.pageToken;
+    setSyncStatus('syncing');
     const prevRev = state.rev;
     google.script.run
       .withSuccessHandler(r => {
         state.isFetching = false;
-        if (!r || !r.ok) { if (typeof callback === 'function') callback(false); return; }
+        if (!r || !r.ok || !Array.isArray(r.list) || !r.dashboard || !r.rev) { setSyncStatus('stale'); finish(false); return; }
         const changed = !prevRev || r.rev !== prevRev;
         applyBootstrap(r);
         state.dataVersion = (state.dataVersion || 0) + 1;
@@ -960,7 +995,7 @@
           showPullIndicator();
           if (opts && opts.fromRemote && Date.now() > (state.quietSyncUntil || 0) && Date.now() - (window.__notifToastAt || 0) > 2000) toast('🔄 Data diperbarui', 'info');
         }
-        if (typeof callback === 'function') callback(true);
+        finish(true);
       })
       .withFailureHandler(e => {
         state.isFetching = false;
@@ -968,9 +1003,9 @@
         // Sheets habis): internet masih ada. Cukup beri tahu pengguna & coba lagi.
         const msg = String((e && e.message) || '');
         const sisiServer = /429|quota|rate.?limit|HTTP 5\d\d|sibuk|timeout|terlalu lama/i.test(msg);
-        if (!sisiServer) setSyncStatus('offline');
-        else toast('⚠️ Server sedang sibuk, data mungkin belum termuat. Coba beberapa saat lagi.', 'warn');
-        if (typeof callback === 'function') callback(false);
+        setSyncStatus('stale');
+        if (sisiServer) toast('⚠️ Server sedang sibuk, data mungkin belum termuat. Coba beberapa saat lagi.', 'warn');
+        finish(false);
       })
       .apiGetBootstrap({ fresh: true });
   }
@@ -1006,7 +1041,7 @@
   window.addEventListener('focus', () => {
     if (state.pollTimer) syncData(true);
   });
-  window.addEventListener('online', () => { setSyncStatus('online'); syncData(true); });
+  window.addEventListener('online', () => { if (!state.offline) { setSyncStatus('stale'); syncData(true); } });
   window.addEventListener('offline', () => setSyncStatus('offline'));
 
   // ============================================================ //
@@ -1015,43 +1050,19 @@
   function renderDashboard() {
     const c = $('appContent');
     if (!c) return;
-    state.greet = null;          // membuka Dashboard → pilih kalimat sapaan baru
+    state.greet = null;
+    if (state.allData && !state.dashboardCache) state.dashboardCache = dashboardFromList(state.allData);
     if (state.dashboardCache) {
       renderDashboardData();
-      if (Date.now() - (state.dashboardAt || 0) < 30000) return;   // baru dimuat → tak perlu minta ulang
-      const token = state.pageToken;
-      google.script.run
-        .withSuccessHandler(r => {
-          if (r.ok && isStillOn(token, 'dashboard')) {
-            state.dashboardCache = r.data;
-            state.dashboardAt = Date.now();
-            STATS_PER_KAMPUNG = r.data.perKampung || {};
-            STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
-            if (r.data.kampungList) applyConfig(r.data);
-            renderDashboardData();
-          }
-        })
-        .withFailureHandler(() => { if (isStillOn(token, 'dashboard')) setSyncStatus('offline'); })
-        .apiGetDashboard();
+      if (!state.offline) syncData(true);
       return;
     }
     c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat data...</p></div>';
-    const token = state.pageToken;
-    google.script.run
-      .withSuccessHandler(r => {
-        if (!isStillOn(token, 'dashboard')) return;
-        if (!r.ok) { c.innerHTML = emptyState('⚠️', 'Gagal', r.message); return; }
-        state.dashboardCache = r.data;
-        STATS_PER_KAMPUNG = r.data.perKampung || {};
-        STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
-        if (r.data.kampungList) applyConfig(r.data);
-        renderDashboardData();
-      })
-      .withFailureHandler(e => {
-        if (!isStillOn(token, 'dashboard')) return;
-        c.innerHTML = emptyState('⚠️', 'Gagal memuat', e.message);
-      })
-      .apiGetDashboard();
+    if (state.offline) return;
+    fetchAndReplace(true, ok => {
+      if (state.page !== 'dashboard') return;
+      if (ok === false && !state.dashboardCache) c.innerHTML = emptyState('⚠️', 'Data belum berhasil dimuat', 'Aplikasi akan mencoba lagi otomatis.');
+    });
   }
 
   // ---------- helper tampilan bersama ---------- //
@@ -3539,7 +3550,7 @@
       if (state.filter.dicetak === 'true') parts.push('🖨️ Sudah Cetak');
       else if (state.filter.dicetak === 'false') parts.push('🖨️ Belum Cetak');
       if (parts.length) infoText += ' • filter: ' + parts.join(', ');
-      info.innerHTML = infoText + ' <span class="live-tag"><span class="sync-dot"></span>Realtime</span>';
+      info.innerHTML = infoText + ' <span class="live-tag">' + liveTagHtml() + '</span>';
     }
 
     if (totalFiltered === 0) {
@@ -5101,54 +5112,15 @@
 
     c.innerHTML = '<div class="page-loading"><div class="spinner"></div><p>Memuat pengaturan...</p></div>';
 
-    google.script.run
-      .withSuccessHandler(cfgR => {
-        if (!isStillOn(token, 'pengaturan')) return;
-        if (cfgR.ok) applyConfig(cfgR.data);
-        google.script.run
-          .withSuccessHandler(r => {
-            if (!isStillOn(token, 'pengaturan')) return;
-            if (r.ok) {
-              state.dashboardCache = r.data;
-              STATS_PER_KAMPUNG = r.data.perKampung || {};
-              STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
-              if (r.data.kampungList && !state.cfgCache) applyConfig(r.data);
-            }
-            renderPengaturanUI();
-          })
-          .withFailureHandler(() => {
-            if (!isStillOn(token, 'pengaturan')) return;
-            renderPengaturanUI();
-          })
-          .apiGetDashboard();
-      })
-      .withFailureHandler(() => {
-        if (!isStillOn(token, 'pengaturan')) return;
-        renderPengaturanUI();
-      })
-      .apiGetConfig();
+    fetchAndReplace(true, () => {
+      if (isStillOn(token, 'pengaturan')) renderPengaturanUI();
+    });
   }
 
   function refreshPengaturanData(token) {
-    google.script.run
-      .withSuccessHandler(cfgR => {
-        if (!isStillOn(token, 'pengaturan')) return;
-        if (cfgR.ok) applyConfig(cfgR.data);
-        google.script.run
-          .withSuccessHandler(r => {
-            if (!isStillOn(token, 'pengaturan')) return;
-            if (r.ok) {
-              state.dashboardCache = r.data;
-              STATS_PER_KAMPUNG = r.data.perKampung || {};
-              STATS_VERIFIED_PER_KAMPUNG = r.data.kampungVerified || {};
-              rerenderPengaturanKeep(); // jangan hapus isian yang sedang diketik
-            }
-          })
-          .withFailureHandler(() => {})
-          .apiGetDashboard();
-      })
-      .withFailureHandler(() => {})
-      .apiGetConfig();
+    fetchAndReplace(true, () => {
+      if (isStillOn(token, 'pengaturan')) rerenderPengaturanKeep();
+    });
   }
 
   function renderPengaturanUI() {
