@@ -1935,7 +1935,7 @@
         // Baris data
         g.rows.forEach((p, idx) => {
           const arr = detailKampungRowArray(detailKampungRow(p, idx)).filter((v, i) => i !== COL_STATUS);
-          arr.push(ttdUrlValue(p));                                    // kolom TTD: tautan bukti TTD
+          arr.push('');                                              // kolom TTD tetap ada, isi kosong
           const center = [0, 4, 5, 6, 7];                 // NO, TGL LAHIR, UMUR, KAWIN, JK
           cells.push(arr.map((v, c) => {
             const isNum = (c === 0) || (c === 5 && /^\d+$/.test(v));   // NO & UMUR sebagai angka
@@ -2193,7 +2193,7 @@
           rowHeights[rIndex] = 32; rIndex++;
           s.rows.forEach((p, idx) => {
             const arr = detailKampungRowArray(detailKampungRow(p, idx)).filter((v, i) => i !== COL_STATUS);
-            arr.push(ttdUrlValue(p));                                    // kolom TTD: tautan bukti TTD
+            arr.push('');                                              // kolom TTD tetap ada, isi kosong
             const center = [0, 4, 5, 6, 7];
             cells.push(arr.map((v, c) => {
               const isNum = (c === 0) || (c === 5 && /^\d+$/.test(v));
